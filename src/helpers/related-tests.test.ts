@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { relatedTests } from "./related-tests.ts";
+import { tempRepo } from "../testing.ts";
 
 const HELPER = join(import.meta.dirname, "related-tests.ts");
 const NODE_TESTS = /-test\.ts$/;
@@ -19,8 +19,7 @@ function write(files: Record<string, string>) {
 }
 
 beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), "gates-related-"));
-  execFileSync("git", ["init", "--quiet"], { cwd: repo });
+  repo = tempRepo();
 });
 
 afterEach(() => {

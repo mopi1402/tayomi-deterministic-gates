@@ -1,9 +1,9 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
+import { tempRepo } from "../testing.ts";
 import { configuredRoot, parseGates } from "./config.ts";
 
 const lint = { name: "lint", severity: "error", files: "\\.ts$", run: ["eslint"] };
@@ -85,9 +85,8 @@ describe("parseGates", () => {
 
 describe("configuredRoot", () => {
   test("finds the repo from a folder inside it, only once it has a gates file", () => {
-    const repo = realpathSync(mkdtempSync(join(tmpdir(), "gates-root-")));
+    const repo = realpathSync(tempRepo());
     try {
-      execFileSync("git", ["init", "--quiet"], { cwd: repo });
       assert.equal(configuredRoot(repo), undefined);
       writeFileSync(join(repo, ".gates.local.json"), file(lint));
       assert.equal(configuredRoot(repo), repo);

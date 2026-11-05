@@ -1,5 +1,4 @@
 import { execFile, type ExecFileException } from "node:child_process";
-import { existsSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { FILES, type Gate, isCompared, TURN } from "./config.ts";

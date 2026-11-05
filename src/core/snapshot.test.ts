@@ -1,24 +1,20 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { changedSince, hasCommit, lastCommit, snapshot, treeOf } from "./snapshot.ts";
+import { changedSince, git, hasCommit, lastCommit, snapshot, treeOf } from "./snapshot.ts";
+import { commitAll, tempRepo } from "../testing.ts";
 
 let repo = "";
-const git = (...args: string[]) => execFileSync("git", args, { cwd: repo, encoding: "utf8" }).trim();
 const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 
 beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), "gates-snapshot-"));
-  git("init", "--quiet");
+  repo = tempRepo();
   writeFileSync(join(repo, ".gitignore"), "ignored.ts\n");
   writeFileSync(join(repo, "kept.ts"), "1");
   writeFileSync(join(repo, "edited.ts"), "1");
   writeFileSync(join(repo, "removed.ts"), "1");
-  git("add", "--all");
-  git("-c", "user.name=test", "-c", "user.email=test@test.invalid", "commit", "--quiet", "-m", "start");
+  commitAll(repo, "start");
   writeFileSync(join(repo, "edited.ts"), "2");
   writeFileSync(join(repo, "before.ts"), "untracked before the turn");
 });
@@ -48,15 +44,15 @@ describe("a turn", () => {
     // a newer date hides this rewrite.
     sleep(1000 - (Date.now() % 1000));
     writeFileSync(join(repo, "kept.ts"), "a");
-    git("add", "kept.ts");
+    git(repo, ["add", "kept.ts"]);
     writeFileSync(join(repo, "kept.ts"), "b");
     sleep(1100);
-    assert.equal(git("show", `${snapshot(repo)}:kept.ts`), "b");
+    assert.equal(git(repo, ["show", `${snapshot(repo)}:kept.ts`]), "b");
   });
 
   test("sees a staged change and an unstaged change on top of it", () => {
     writeFileSync(join(repo, "kept.ts"), "staged");
-    git("add", "kept.ts");
+    git(repo, ["add", "kept.ts"]);
     const start = snapshot(repo);
     writeFileSync(join(repo, "kept.ts"), "edited after staging");
     assert.deepEqual(changedSince(repo, start), ["kept.ts"]);
@@ -80,9 +76,8 @@ describe("a turn", () => {
   });
 
   test("runs from nothing in a repo with no commit yet", () => {
-    const empty = mkdtempSync(join(tmpdir(), "gates-snapshot-empty-"));
+    const empty = tempRepo();
     try {
-      execFileSync("git", ["init", "--quiet"], { cwd: empty });
       writeFileSync(join(empty, "first.ts"), "1");
       assert.deepEqual(changedSince(empty, lastCommit(empty)), ["first.ts"]);
     } finally {
@@ -91,11 +86,11 @@ describe("a turn", () => {
   });
 
   test("leaves the index, the branch and the status untouched", () => {
-    git("add", "before.ts");
-    const status = git("status", "--porcelain");
-    const head = git("rev-parse", "HEAD");
+    git(repo, ["add", "before.ts"]);
+    const status = git(repo, ["status", "--porcelain"]);
+    const head = git(repo, ["rev-parse", "HEAD"]);
     snapshot(repo);
-    assert.equal(git("status", "--porcelain"), status);
-    assert.equal(git("rev-parse", "HEAD"), head);
+    assert.equal(git(repo, ["status", "--porcelain"]), status);
+    assert.equal(git(repo, ["rev-parse", "HEAD"]), head);
   });
 });

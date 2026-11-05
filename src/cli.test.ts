@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { spawnSync } from "node:child_process";
+import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { stripVTControlCharacters } from "node:util";
+import { tempRepo, writeGates } from "./testing.ts";
 
 const CLI = join(import.meta.dirname, "cli.ts");
 
@@ -17,8 +17,7 @@ function cli(args: string[], { input = "", node = [] as string[] } = {}) {
 }
 
 beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), "gates-cli-"));
-  execFileSync("git", ["init", "--quiet"], { cwd: repo });
+  repo = tempRepo();
 });
 
 afterEach(() => {
@@ -30,14 +29,10 @@ describe("check", () => {
     writeFileSync(join(repo, "fail.mjs"), 'console.log("a problem"); process.exit(1)');
     writeFileSync(join(repo, "pass.mjs"), "");
     writeFileSync(join(repo, "a.ts"), "1");
-    writeFileSync(
-      join(repo, ".gates.json"),
-      JSON.stringify({
-        gates: [
-          { name: "red", severity: "error", files: "\\.ts$", run: ["fail.mjs"] },
-          { name: "green", severity: "error", files: "\\.ts$", run: ["pass.mjs"] },
-        ],
-      }),
+    writeGates(
+      repo,
+      { name: "red", severity: "error", files: "\\.ts$", run: ["fail.mjs"] },
+      { name: "green", severity: "error", files: "\\.ts$", run: ["pass.mjs"] },
     );
     const { status, stdout } = cli(["check"]);
     assert.equal(status, 1);
@@ -49,10 +44,7 @@ describe("check", () => {
   test("exits with 0 when every gate is green", () => {
     writeFileSync(join(repo, "pass.mjs"), "");
     writeFileSync(join(repo, "a.ts"), "1");
-    writeFileSync(
-      join(repo, ".gates.json"),
-      JSON.stringify({ gates: [{ name: "green", severity: "error", files: "\\.ts$", run: ["pass.mjs"] }] }),
-    );
+    writeGates(repo, { name: "green", severity: "error", files: "\\.ts$", run: ["pass.mjs"] });
     const { status, stdout } = cli(["check"]);
     assert.equal(status, 0);
     assert.match(stdout, /1\/1 gates green/);
@@ -84,7 +76,7 @@ describe("on a Node before 24.2", () => {
   test("tells the owner, in the hook and in check, instead of helpers that never run", () => {
     const old = join(repo, "old-node.cjs");
     writeFileSync(old, 'Object.defineProperty(process.versions, "node", { value: "24.1.0" });');
-    writeFileSync(join(repo, ".gates.json"), JSON.stringify({ gates: [] }));
+    writeGates(repo);
     const input = JSON.stringify({ session_id: "s", cwd: repo });
     const hook = cli(["hook", "check"], { input, node: ["--require", old] });
     assert.equal(hook.status, 0);

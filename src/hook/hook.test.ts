@@ -1,22 +1,13 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { stripVTControlCharacters } from "node:util";
-import type { CheckedTurn } from "../core/check.ts";
-import type { Outcome } from "../core/run.ts";
+import { outcome, ran, tempRepo } from "../testing.ts";
+import { git } from "../core/snapshot.ts";
 import { handleHook, parseHookInput, stopOutput } from "./hook.ts";
-
-function outcome(name: string, ok: boolean): Outcome {
-  return { name, ok, ms: 10, output: `${name} report`, report: `${name} report` };
-}
-
-function ran(...outcomes: Outcome[]): CheckedTurn {
-  return { changed: ["src/a.ts"], outcomes, skipped: [], ms: 20 };
-}
 
 const FAILING_GATE = JSON.stringify({
   gates: [{ name: "fail", severity: "error", files: "\\.ts$", run: ["fail.mjs"] }],
@@ -48,8 +39,8 @@ function session() {
     folder,
     /** A repo whose gate fails on any changed .ts file. */
     repo: (gates: string | undefined = FAILING_GATE) => {
-      const path = folder();
-      execFileSync("git", ["init", "--quiet"], { cwd: path });
+      const path = tempRepo();
+      folders.push(path);
       writeFileSync(join(path, "fail.mjs"), "process.exit(1)");
       if (gates !== undefined) writeFileSync(join(path, ".gates.json"), gates);
       return path;
@@ -77,19 +68,19 @@ describe("parseHookInput", () => {
 
 describe("stopOutput", () => {
   test("only shows the summary when every gate passes", () => {
-    const output = stopOutput(ran(outcome("lint", true)), false);
+    const output = stopOutput(ran([outcome("lint", true)]), false);
     assert.equal(output.decision, undefined);
     assert.ok(output.systemMessage);
   });
 
   test("sends the agent back once with the reports of the failed gates", () => {
-    const output = stopOutput(ran(outcome("lint", false), outcome("dead", true)), false);
+    const output = stopOutput(ran([outcome("lint", false), outcome("dead", true)]), false);
     assert.equal(output.decision, "block");
     assert.match(output.reason ?? "", /## lint\nlint report/);
   });
 
   test("never sends the agent back twice, so it never loops", () => {
-    const output = stopOutput(ran(outcome("lint", false)), true);
+    const output = stopOutput(ran([outcome("lint", false)]), true);
     assert.equal(output.decision, undefined);
   });
 });
@@ -109,7 +100,7 @@ describe("handleHook", () => {
     const folder = agent.folder();
     assert.equal(await agent.prompt(folder), undefined);
     assert.equal(await agent.stop(folder), undefined);
-    execFileSync("git", ["init", "--quiet"], { cwd: folder });
+    git(folder, ["init", "--quiet"]);
     assert.equal(await agent.prompt(folder), undefined);
     assert.equal(await agent.stop(folder), undefined);
     writeFileSync(join(folder, ".gates.json"), JSON.stringify({ gates: [] }));

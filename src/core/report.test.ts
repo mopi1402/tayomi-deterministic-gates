@@ -1,17 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { stripVTControlCharacters } from "node:util";
-import type { CheckedTurn } from "./check.ts";
+import { outcome, ran } from "../testing.ts";
 import { duration, excerpt, failures, summary } from "./report.ts";
-import type { Outcome } from "./run.ts";
-
-function outcome(name: string, ok: boolean, ms: number): Outcome {
-  return { name, ok, ms, output: `${name} report`, report: `${name} report` };
-}
-
-function ran(outcomes: Outcome[], skipped: string[] = [], ms = 20): CheckedTurn {
-  return { changed: ["src/a.ts"], outcomes, skipped, ms };
-}
 
 const shown = (text: string) => stripVTControlCharacters(text).split("\n");
 

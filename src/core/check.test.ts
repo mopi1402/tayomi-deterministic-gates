@@ -1,8 +1,6 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { checkAll, checkTurn, startTurn } from "./check.ts";
@@ -10,13 +8,12 @@ import { gatesOf, readGatesFiles } from "./config.ts";
 import { cachedReports } from "./report-cache.ts";
 import { snapshot, treeOf } from "./snapshot.ts";
 import { readTurn, writeTurn } from "./turn-state.ts";
+import { commitAll, tempRepo, writeGates } from "../testing.ts";
 
 let repo = "";
 let session = "";
 
-function gates(...list: object[]) {
-  writeFileSync(join(repo, ".gates.json"), JSON.stringify({ gates: list }));
-}
+const gates = (...list: object[]) => writeGates(repo, ...list);
 
 function cachedNow(): string | undefined {
   const [gate] = gatesOf(readGatesFiles(repo));
@@ -24,9 +21,8 @@ function cachedNow(): string | undefined {
 }
 
 beforeEach(() => {
-  repo = mkdtempSync(join(tmpdir(), "gates-check-"));
+  repo = tempRepo();
   session = `test-${randomUUID()}`;
-  execFileSync("git", ["init", "--quiet"], { cwd: repo });
   gates();
 });
 
@@ -116,8 +112,7 @@ describe("a check of the whole repo", () => {
     writeFileSync(join(repo, "tool.mjs"), "console.log(process.argv.slice(2).join(' ')); process.exit(1)");
     gates({ name: "list", severity: "error", files: "\\.ts$", run: ["tool.mjs", "{files}"] });
     writeFileSync(join(repo, "committed.ts"), "1");
-    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t.invalid", "add", "-A"], { cwd: repo });
-    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t.invalid", "commit", "-qm", "old"], { cwd: repo });
+    commitAll(repo, "old");
     await startTurn(session, repo);
     writeFileSync(join(repo, "new.ts"), "1");
     const all = await checkAll(repo);

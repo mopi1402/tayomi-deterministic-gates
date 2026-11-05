@@ -9,7 +9,7 @@ interface GitOptions {
 }
 
 /** Runs git in the repo, and gives what it printed, trimmed. */
-function git(root: string, args: string[], { env = process.env, input }: GitOptions = {}): string {
+export function git(root: string, args: string[], { env = process.env, input }: GitOptions = {}): string {
   return execFileSync("git", args, { cwd: root, encoding: "utf8", env, input, stdio: "pipe" }).trim();
 }
 
