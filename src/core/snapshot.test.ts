@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
-import { changedSince, git, hasCommit, lastCommit, snapshot, treeOf } from "./snapshot.ts";
-import { commitAll, tempRepo } from "../testing.ts";
+import { commitAll, git, tempRepo } from "../testing.ts";
+import { changedSince, hasCommit, lastCommit, snapshot, treeOf } from "./snapshot.ts";
 
 let repo = "";
 const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);

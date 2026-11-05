@@ -14,8 +14,9 @@ const NODE_TESTS = new RegExp(
   `(\\.test|[-_]test|^test|/test)${EXTENSION}$|/test/.*${EXTENSION}$|(^|/)test-[^/]*${EXTENSION}$`,
 );
 
+// An import of types only runs nothing: the type check is the gate that covers it.
 const SPECIFIERS =
-  /(?:^|[\s;])(?:import|export)\b[^'"]*?\bfrom\s*['"]([^'"]+)['"]|(?:^|[\s;])import\s*['"]([^'"]+)['"]/g;
+  /(?:^|[\s;])(?:import|export)\b(?!\s+type\b)[^'"]*?\bfrom\s*['"]([^'"]+)['"]|(?:^|[\s;])import\s*['"]([^'"]+)['"]/g;
 
 // A relative specifier, resolved as Node would among the files of the repo, with the TypeScript file an import of
 // its .js output names.

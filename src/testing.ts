@@ -1,11 +1,17 @@
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CheckedTurn } from "./core/check.ts";
 import type { Outcome } from "./core/run.ts";
-import { git } from "./core/snapshot.ts";
 
-// What the tests of the engine build again and again: a repo of their own, its commits, its gates, and a turn.
+// What the tests of the engine build again and again: a repo of their own, its commits, its gates, and a turn. It
+// runs git by itself: every test imports this file, so a module of the engine imported here would make every test
+// related to it.
+
+export function git(repo: string, args: string[]): string {
+  return execFileSync("git", args, { cwd: repo, encoding: "utf8", stdio: "pipe" }).trim();
+}
 
 /** A fresh git repo in a temporary folder, for the test to remove. */
 export function tempRepo(): string {

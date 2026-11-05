@@ -5,8 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { stripVTControlCharacters } from "node:util";
-import { outcome, ran, tempRepo } from "../testing.ts";
-import { git } from "../core/snapshot.ts";
+import { git, outcome, ran, tempRepo } from "../testing.ts";
 import { handleHook, parseHookInput, stopOutput } from "./hook.ts";
 
 const FAILING_GATE = JSON.stringify({

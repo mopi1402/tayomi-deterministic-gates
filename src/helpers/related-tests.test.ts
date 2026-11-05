@@ -55,6 +55,15 @@ describe("relatedTests", () => {
     assert.deepEqual(relatedTests(repo, ["src/lib/index.ts"], NODE_TESTS), ["src/lib-test.ts"]);
   });
 
+  test("ignores an import of types only, which the type check covers and nothing runs", () => {
+    write({
+      "src/a.ts": "export interface A { n: number }\nexport const a = 1;",
+      "src/types-test.ts": 'import type { A } from "./a.ts";\nconst x: A = { n: 1 };\nconsole.log(x);',
+      "src/value-test.ts": 'import { a } from "./a.ts";\nconsole.log(a);',
+    });
+    assert.deepEqual(relatedTests(repo, ["src/a.ts"], NODE_TESTS), ["src/value-test.ts"]);
+  });
+
   test("survives an import cycle", () => {
     write({
       "src/a.ts": 'import "./b.ts";\nexport const a = 1;',
