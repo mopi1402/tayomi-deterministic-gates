@@ -1,6 +1,6 @@
 import { execFile, type ExecFileException } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import { join, sep } from "node:path";
+import { resolve, sep } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import type { Gate } from "./config.ts";
 import { isRecord, messageOf, readJson } from "./json.ts";
@@ -13,7 +13,8 @@ export interface Outcome {
   report: string | undefined;
 }
 
-const ENGINE = join(import.meta.dirname, "..", "..");
+const ENGINE = resolve(import.meta.dirname, "..", "..");
+const MAX_OUTPUT_MB = 16;
 const ENGINE_PREFIX = "{engine}/";
 
 /** How a gate's command starts: the program to execute, the arguments before the gate's own, and why it may be missing. */
@@ -31,14 +32,14 @@ const INTERPRETERS: [RegExp, string][] = [
 
 /** The script of a package of the repo's node_modules, or nothing when the repo does not have the package. */
 export function packageScript(root: string, name: string): string | undefined {
-  const dir = join(root, "node_modules", name);
-  if (!existsSync(join(dir, "package.json"))) return undefined;
-  const manifest = readJson(readFileSync(join(dir, "package.json"), "utf8"));
+  const dir = resolve(root, "node_modules", name);
+  if (!existsSync(resolve(dir, "package.json"))) return undefined;
+  const manifest = readJson(readFileSync(resolve(dir, "package.json"), "utf8"));
   const bin = isRecord(manifest) ? manifest.bin : undefined;
   const commands = isRecord(bin) ? bin : {};
   const script = typeof bin === "string" ? bin : (commands[name] ?? Object.values(commands)[0]);
   if (typeof script !== "string") throw new Error(`${name} has no command.`);
-  return join(dir, script);
+  return resolve(dir, script);
 }
 
 /**
@@ -48,19 +49,19 @@ export function packageScript(root: string, name: string): string | undefined {
  */
 export function commandOf(root: string, name: string): Command {
   if (name.startsWith(ENGINE_PREFIX)) {
-    return { file: process.execPath, args: [join(ENGINE, name.slice(ENGINE_PREFIX.length))], missing: "" };
+    return { file: process.execPath, args: [resolve(ENGINE, name.slice(ENGINE_PREFIX.length))], missing: "" };
   }
   const interpreter = INTERPRETERS.find(([extension]) => extension.test(name))?.[1];
   if (interpreter !== undefined) {
     return {
       file: interpreter,
-      args: [join(root, name)],
+      args: [resolve(root, name)],
       missing: `${interpreter} is not installed, and ${name} needs it.`,
     };
   }
   const script = packageScript(root, name);
   if (script !== undefined) return { file: process.execPath, args: [script], missing: "" };
-  if (name.includes("/")) return { file: join(root, name), args: [], missing: `${name} does not exist in the repo.` };
+  if (name.includes("/")) return { file: resolve(root, name), args: [], missing: `${name} does not exist.` };
   return {
     file: name,
     args: [],
@@ -105,7 +106,7 @@ function execute(root: string, gate: Gate, args: string[]): Promise<{ ok: boolea
       {
         cwd: root,
         timeout: gate.timeoutSeconds * 1000,
-        maxBuffer: 16 * 1024 * 1024,
+        maxBuffer: MAX_OUTPUT_MB * 1024 * 1024,
         env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
       },
       (error, stdout, stderr) => {
@@ -126,6 +127,8 @@ function outputOf(
   error: ExecFileException | null,
   printed: string,
 ): string {
+  if (error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")
+    return `Printed more than ${MAX_OUTPUT_MB} MB: too much for the end of a turn. Make it quieter, or move it to CI.`;
   if (error?.killed === true)
     return `Timed out after ${gate.timeoutSeconds} s: too slow for the end of a turn. Make it faster, or move it to CI.`;
   if (error?.code === "ENOENT") return command.missing;

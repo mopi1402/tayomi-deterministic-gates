@@ -75,9 +75,10 @@ describe("commandOf", () => {
     assert.deepEqual(pick(commandOf(root, "typescript")), [process.execPath, tsc]);
   });
 
-  test("runs any other name from the PATH, and a path from the repo", () => {
+  test("runs any other name from the PATH, a path from the repo, and an absolute path as it is", () => {
     assert.deepEqual(pick(commandOf(root, "gofmt")), ["gofmt"]);
     assert.deepEqual(pick(commandOf(root, ".venv/bin/ruff")), [join(root, ".venv/bin/ruff")]);
+    assert.deepEqual(pick(commandOf(root, "/usr/bin/env")), ["/usr/bin/env"]);
   });
 });
 
@@ -104,6 +105,20 @@ describe("check, on any language", () => {
     assert.equal(outcome.ok, true);
     assert.match(outcome.output, /^git version/);
   });
+
+  test("fails when its command is not installed, instead of breaking the whole check", async () => {
+    const missing = { ...LINT, run: ["no-such-tool", "{files}"] };
+    const outcome = await check(root, missing, ["a.ts"], "abc", undefined);
+    assert.equal(outcome.ok, false);
+    assert.match(outcome.output, /no-such-tool is not installed/);
+  });
+
+  test("fails on a report too long to read, and says so instead of a timeout", async () => {
+    tool('process.stdout.write("x".repeat(17 * 1024 * 1024))');
+    const outcome = await check(root, COMPARED, [], "abc", undefined);
+    assert.equal(outcome.ok, false);
+    assert.match(outcome.output, /more than 16 MB/);
+  });
 });
 
 describe("check, compared with the turn start", () => {
@@ -121,13 +136,6 @@ describe("check, compared with the turn start", () => {
     assert.equal(outcome.ok, false);
     assert.equal(outcome.output, "boom");
     assert.equal(outcome.report, undefined);
-  });
-
-  test("fails when its command is not installed, instead of breaking the whole check", async () => {
-    const missing = { ...LINT, run: ["no-such-tool", "{files}"] };
-    const outcome = await check(root, missing, ["a.ts"], "abc", undefined);
-    assert.equal(outcome.ok, false);
-    assert.match(outcome.output, /no-such-tool is not installed/);
   });
 
   test("fails when the command times out, even if it timed out as the turn started", async () => {

@@ -37,7 +37,7 @@ describe("the catalog", () => {
     assert.throws(() => parseCatalog("python", catalog([ENTRY, ENTRY])), /python\/lint: twice/);
   });
 
-  test("has a page that matches its files: run npm run catalog after changing one", () => {
+  test("has a page that matches its files: run pnpm catalog after changing one", () => {
     assert.equal(readFileSync(PAGE, "utf8"), catalogHtml(readCatalogs(CATALOG_DIR)));
   });
 

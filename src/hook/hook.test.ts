@@ -105,10 +105,12 @@ describe("handleHook", () => {
     agent.cleanup();
   });
 
-  test("does nothing outside git, or in a repo with no gates file", async () => {
+  test("does nothing outside git, or in a repo with no gates file, at the prompt as at the stop", async () => {
     const folder = agent.folder();
+    assert.equal(await agent.prompt(folder), undefined);
     assert.equal(await agent.stop(folder), undefined);
     execFileSync("git", ["init", "--quiet"], { cwd: folder });
+    assert.equal(await agent.prompt(folder), undefined);
     assert.equal(await agent.stop(folder), undefined);
     writeFileSync(join(folder, ".gates.json"), JSON.stringify({ gates: [] }));
     assert.ok(await agent.stop(folder));

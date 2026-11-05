@@ -1,7 +1,8 @@
 import { readFileSync } from "node:fs";
 import { checkAll } from "./core/check.ts";
+import { configuredRoot } from "./core/config.ts";
+import { messageOf } from "./core/json.ts";
 import { broken, reports, summary } from "./core/report.ts";
-import { repoRoot } from "./core/snapshot.ts";
 import { handleHook } from "./hook/hook.ts";
 
 function readStdin(): string {
@@ -31,14 +32,19 @@ if (oldNode !== undefined) {
   const output = await handleHook(event, readStdin());
   if (output) console.log(JSON.stringify(output));
 } else if (command === "check" && event === undefined) {
-  const root = repoRoot(process.cwd());
+  const root = configuredRoot(process.cwd());
   if (root === undefined) {
-    console.error("Not in a git repository.");
+    console.error("Not in a git repository, or no .gates.json in it.");
     process.exitCode = 2;
   } else {
-    const all = await checkAll(root);
-    console.log([summary(all), ...reports(all.outcomes)].join("\n\n"));
-    if (all.outcomes.some((outcome) => !outcome.ok)) process.exitCode = 1;
+    try {
+      const all = await checkAll(root);
+      console.log([summary(all), ...reports(all.outcomes)].join("\n\n"));
+      if (all.outcomes.some((outcome) => !outcome.ok)) process.exitCode = 1;
+    } catch (error) {
+      console.error(`Could not run: ${messageOf(error)}`);
+      process.exitCode = 2;
+    }
   }
 } else {
   console.error("Usage: node src/cli.ts hook <turn-start|check>, or node src/cli.ts check");

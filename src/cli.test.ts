@@ -64,6 +64,20 @@ describe("check", () => {
     assert.equal(status, 2);
     assert.match(stderr, /not in a git repository/i);
   });
+
+  test("says so in a repo with no gates file, and exits with 2", () => {
+    const { status, stderr } = cli(["check"]);
+    assert.equal(status, 2);
+    assert.match(stderr, /no \.gates\.json/i);
+  });
+
+  test("says so when the gates file does not parse, and exits with 2 without a stack trace", () => {
+    writeFileSync(join(repo, ".gates.json"), "{");
+    const { status, stderr } = cli(["check"]);
+    assert.equal(status, 2);
+    assert.match(stderr, /\.gates\.json is not valid JSON/);
+    assert.doesNotMatch(stderr, /\n\s+at /);
+  });
 });
 
 describe("on a Node before 24.2", () => {

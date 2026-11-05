@@ -155,7 +155,7 @@ export function catalogHtml(catalogs: Catalog[]): string {
 <header>
 <h1>Gate catalog</h1>
 <p>The gates worth copying into a repo. Nothing here runs by itself: the engine reads only the repo's <code>.gates.json</code>. Copy the definition of a gate there, install what it requires, and adapt its <code>files</code> to the layout of the repo.</p>
-<p>Generated from <code>catalog/*.json</code> by <code>npm run catalog</code>: edit those files, never this page.</p>
+<p>Generated from <code>catalog/*.json</code> by <code>pnpm catalog</code>: edit those files, never this page.</p>
 <nav>${nav.join("")}</nav>
 </header>
 ${catalogs.map(catalogSection).join("\n")}
