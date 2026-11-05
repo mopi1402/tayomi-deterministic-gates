@@ -1,9 +1,9 @@
 import { execFile, type ExecFileException } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import type { Gate } from "./config.ts";
-import { isRecord, messageOf, readJson } from "./json.ts";
+import { type Gate, isCompared } from "./config.ts";
+import { isRecord, messageOf, readJsonFile } from "./json.ts";
 
 export interface Outcome {
   name: string;
@@ -16,6 +16,8 @@ export interface Outcome {
 const ENGINE = resolve(import.meta.dirname, "..", "..");
 const MAX_OUTPUT_MB = 16;
 const ENGINE_PREFIX = "{engine}/";
+const FILES = "{files}";
+const TURN = "{turn}";
 
 /** How a gate's command starts: the program to execute, the arguments before the gate's own, and why it may be missing. */
 export interface Command {
@@ -34,7 +36,7 @@ const INTERPRETERS: [RegExp, string][] = [
 export function packageScript(root: string, name: string): string | undefined {
   const dir = resolve(root, "node_modules", name);
   if (!existsSync(resolve(dir, "package.json"))) return undefined;
-  const manifest = readJson(readFileSync(resolve(dir, "package.json"), "utf8"));
+  const manifest = readJsonFile(resolve(dir, "package.json"));
   const bin = isRecord(manifest) ? manifest.bin : undefined;
   const commands = isRecord(bin) ? bin : {};
   const script = typeof bin === "string" ? bin : (commands[name] ?? Object.values(commands)[0]);
@@ -70,9 +72,12 @@ export function commandOf(root: string, name: string): Command {
 }
 
 export function argumentsOf(gate: Gate, files: string[], turn: string): string[] {
-  return gate.run
-    .slice(1)
-    .flatMap((argument) => (argument === "{files}" ? files : [argument.replaceAll("{turn}", turn)]));
+  return gate.run.slice(1).flatMap((argument) => (argument === FILES ? files : [argument.replaceAll(TURN, turn)]));
+}
+
+/** Whether the gate is given the changed files, where another reads the whole project. */
+export function givenFiles(gate: Gate): boolean {
+  return gate.run.includes(FILES);
 }
 
 export function filesOf(gate: Gate, changed: string[]): string[] {
@@ -140,7 +145,7 @@ export async function wholeProject(root: string, gate: Gate): Promise<{ ok: bool
   const { ok, output } = await execute(
     root,
     gate,
-    gate.run.slice(1).filter((arg) => arg !== "{files}"),
+    gate.run.slice(1).filter((arg) => arg !== FILES),
   );
   return { ok, output };
 }
@@ -158,7 +163,7 @@ export async function check(
 ): Promise<Outcome> {
   const { ok, output, ms } = await execute(root, gate, argumentsOf(gate, files, turn));
   const ran = { name: gate.name, ms, report: ok ? output : undefined };
-  if (gate.compare !== "turn-start" || !ok) return { ...ran, ok, output };
+  if (!isCompared(gate) || !ok) return { ...ran, ok, output };
   if (baseline === undefined) return { ...ran, ok: true, output: "" };
   const added = newLines(baseline, output, gate.ignoreLines);
   return { ...ran, ok: added.length === 0, output: added.join("\n") };

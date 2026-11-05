@@ -1,6 +1,6 @@
 import { type CheckedTurn, checkTurn, startTurn } from "../core/check.ts";
 import { configuredRoot } from "../core/config.ts";
-import { isRecord, messageOf, readJson } from "../core/json.ts";
+import { isRecord, messageOf, parseJson } from "../core/json.ts";
 import { broken, failures, summary } from "../core/report.ts";
 import { forgetTurn, turnRoot } from "../core/turn-state.ts";
 
@@ -17,7 +17,7 @@ export interface HookOutput {
 }
 
 export function parseHookInput(text: string): HookInput {
-  const input = readJson(text);
+  const input = parseJson(text);
   if (!isRecord(input)) return {};
   const { session_id, stop_hook_active, cwd } = input;
   return {

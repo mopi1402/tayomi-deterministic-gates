@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { changedGatesFiles, type Gate, gatesOf, loadGates, readGatesFiles } from "./config.ts";
+import { changedGatesFiles, type Gate, gatesOf, isCompared, loadGates, readGatesFiles } from "./config.ts";
 import { cachedReports, cacheReports } from "./report-cache.ts";
-import { check, filesOf, type Outcome, wholeProject } from "./run.ts";
+import { check, filesOf, givenFiles, type Outcome, wholeProject } from "./run.ts";
 import { changedSince, emptyCommit, hasCommit, lastCommit, snapshot, treeOf } from "./snapshot.ts";
 import { readTurn, writeTurn } from "./turn-state.ts";
 
@@ -29,7 +29,7 @@ type Baselines = (gate: Gate) => string | undefined;
  */
 export async function startTurn(session: string, root: string): Promise<void> {
   const config = readGatesFiles(root);
-  const compared = gatesOf(config).filter((gate) => gate.compare === "turn-start");
+  const compared = gatesOf(config).filter(isCompared);
   const interrupted = readTurn(session, root);
   if (interrupted?.checked === false) {
     writeTurn(session, root, interrupted);
@@ -77,7 +77,7 @@ function runGates(
   return Promise.all(
     gates.map(async (gate) => {
       const matching = filesOf(gate, changed);
-      const files = gate.run.includes("{files}") ? matching.filter((file) => existsSync(join(root, file))) : matching;
+      const files = givenFiles(gate) ? matching.filter((file) => existsSync(join(root, file))) : matching;
       if (!files.length) return { gate };
       return { gate, outcome: await check(root, gate, files, turn, baselines(gate)) };
     }),
@@ -112,7 +112,7 @@ export async function checkAll(root: string): Promise<CheckedTurn> {
 // keeps none: it may still read a changed file its pattern misses, as knip reads tsconfig.json.
 function endReports(results: Result[], baselines: Baselines) {
   return results.flatMap(({ gate, outcome }) => {
-    if (gate.compare !== "turn-start" || !outcome || gate.run.includes("{files}")) return [];
+    if (!isCompared(gate) || !outcome || givenFiles(gate)) return [];
     const report = outcome.ok ? outcome.report : baselines(gate);
     return report === undefined ? [] : [[gate, report] as const];
   });
@@ -151,7 +151,7 @@ export async function checkTurn(session: string, root: string): Promise<CheckedT
   writeTurn(session, root, { ...turn, checked: true });
   // A compared gate with no report from the turn start can only count its exit code: a green it did not earn is said.
   const uncompared = results
-    .filter(({ gate, outcome }) => outcome && gate.compare === "turn-start" && baselines(gate) === undefined)
+    .filter(({ gate, outcome }) => outcome && isCompared(gate) && baselines(gate) === undefined)
     .map(({ gate }) => `${gate.name} not compared: no report from the turn start, only its exit code counted`);
   const notes = [
     ...startNote(recorded !== undefined, lost),

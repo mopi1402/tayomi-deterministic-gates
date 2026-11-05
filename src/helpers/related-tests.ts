@@ -1,5 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 
 // The node:test tests that a change can break: those that import a changed file, directly or through other files.
@@ -23,6 +23,14 @@ function files(root: string): string[] {
     .filter(Boolean);
 }
 
+function isFile(path: string): boolean {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
+  }
+}
+
 // A relative specifier, resolved as Node would, with the TypeScript file an import of its .js output names.
 function resolveImport(from: string, specifier: string): string | undefined {
   if (!specifier.startsWith(".")) return undefined;
@@ -34,7 +42,7 @@ function resolveImport(from: string, specifier: string): string | undefined {
     ...(base.endsWith(".mjs") ? [base.replace(/\.mjs$/, ".mts")] : []),
     ...EXTENSIONS.map((extension) => join(base, `index${extension}`)),
   ];
-  return candidates.find((candidate) => existsSync(candidate) && !candidate.endsWith("/"));
+  return candidates.find(isFile);
 }
 
 function importsOf(file: string): string[] {

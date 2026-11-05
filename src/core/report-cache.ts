@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Gate } from "./config.ts";
-import { isRecord, readJson } from "./json.ts";
+import { isRecord, readJsonFile } from "./json.ts";
 
 // A turn almost always starts from the tree the previous turn ended on, so it reuses the reports of that tree
 // instead of running the compared gates again while the prompt waits.
@@ -42,12 +42,8 @@ function cacheFile(root: string): string {
 }
 
 function readCache(root: string): Cache | undefined {
-  try {
-    const cache = readJson(readFileSync(cacheFile(root), "utf8"));
-    return isCache(cache) ? cache : undefined;
-  } catch {
-    return undefined;
-  }
+  const cache = readJsonFile(cacheFile(root));
+  return isCache(cache) ? cache : undefined;
 }
 
 export function cachedReports(root: string, tree: string): (gate: Gate) => string | undefined {

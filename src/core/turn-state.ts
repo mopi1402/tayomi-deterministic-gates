@@ -1,8 +1,8 @@
-import { readFileSync, writeFileSync } from "node:fs";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GatesFiles } from "./config.ts";
-import { isRecord, isStringRecord, readJson } from "./json.ts";
+import { isRecord, isStringRecord, readJsonFile } from "./json.ts";
 
 /**
  * What a turn started from: the commit, the reports of its compared gates, and the gates files themselves, since a
@@ -59,12 +59,8 @@ function isSessionState(value: unknown): value is SessionState {
 }
 
 function readSession(session: string): SessionState {
-  try {
-    const state = readJson(readFileSync(stateFile(session), "utf8"));
-    return isSessionState(state) ? state : EMPTY;
-  } catch {
-    return EMPTY;
-  }
+  const state = readJsonFile(stateFile(session));
+  return isSessionState(state) ? state : EMPTY;
 }
 
 function writeSession(session: string, state: SessionState): void {

@@ -22,6 +22,11 @@ export interface Gate {
 
 type Entry = Record<string, unknown> & { name: string };
 
+/** A gate that fails on the lines of output the turn added, with the report of the turn start to compare with. */
+export function isCompared(gate: Gate): boolean {
+  return gate.compare === "turn-start";
+}
+
 function refuse(gate: string, problem: string): never {
   throw new Error(`Gate ${gate}: ${problem}.`);
 }

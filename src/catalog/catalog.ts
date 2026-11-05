@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { type Gate, parseGates } from "../core/config.ts";
+import { type Gate, isCompared, parseGates } from "../core/config.ts";
 import { isRecord, messageOf } from "../core/json.ts";
 
 // The catalog lists the gates worth copying into a repo, one file per technology. It never runs by itself: the engine
@@ -85,7 +85,7 @@ function linked(text: string): string {
 
 function entryHtml(entry: Entry): string {
   const { id, description, requires, gate, definition } = entry;
-  const compare = gate.compare === "turn-start" ? "<dt>Fails on</dt><dd>only the output lines the turn added</dd>" : "";
+  const compare = isCompared(gate) ? "<dt>Fails on</dt><dd>only the output lines the turn added</dd>" : "";
   const tools = requires.map(({ tool, install }) => `<li><code>${escape(tool)}</code>: ${linked(install)}</li>`);
   return `<article id="${escape(id)}">
 <h3><code>${escape(id)}</code></h3>

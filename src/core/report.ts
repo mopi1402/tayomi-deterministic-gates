@@ -23,7 +23,7 @@ export function duration(ms: number): string {
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`;
 }
 
-function item(mark: string, outcome: Outcome): string {
+function gateLine(mark: string, outcome: Outcome): string {
   return `${mark} ${outcome.name} ${paint("dim", duration(outcome.ms))}`;
 }
 
@@ -37,17 +37,17 @@ function nothingChecked({ changed, skipped }: CheckedTurn): string[] {
   return [`${paint("pass", LABEL)}  no gate looks at the ${files}`, ...(skipped.length ? [skippedLine(skipped)] : [])];
 }
 
-function results({ outcomes, skipped, ms }: CheckedTurn, onFailure: string): string[] {
+function resultLines({ outcomes, skipped, ms }: CheckedTurn, onFailure: string): string[] {
   const failed = outcomes.filter((outcome) => !outcome.ok).sort((a, b) => b.ms - a.ms);
   const passed = outcomes.filter((outcome) => outcome.ok).sort((a, b) => b.ms - a.ms);
   const after = failed.length && onFailure ? ` · ${onFailure}` : "";
   const notRun = skipped.length ? ` · ${skipped.length} skipped` : "";
   const lines = [
     `${paint(failed.length ? "fail" : "pass", LABEL)}  ${passed.length}/${outcomes.length} gates green in ${duration(ms)}${notRun}${after}`,
-    ...failed.map((outcome) => item(paint("fail", "✗"), outcome)),
+    ...failed.map((outcome) => gateLine(paint("fail", "✗"), outcome)),
   ];
   if (passed.length) {
-    const shown = passed.slice(0, SHOWN_PASSES).map((outcome) => item(paint("pass", "✓"), outcome));
+    const shown = passed.slice(0, SHOWN_PASSES).map((outcome) => gateLine(paint("pass", "✓"), outcome));
     const rest = passed.length - shown.length;
     lines.push([...shown, ...(rest > 0 ? [paint("dim", `... +${rest}`)] : [])].join("  "));
   }
@@ -61,7 +61,7 @@ function results({ outcomes, skipped, ms }: CheckedTurn, onFailure: string): str
  * concern.
  */
 export function summary(turn: CheckedTurn, onFailure = ""): string {
-  const lines = turn.outcomes.length ? results(turn, onFailure) : nothingChecked(turn);
+  const lines = turn.outcomes.length ? resultLines(turn, onFailure) : nothingChecked(turn);
   return [...lines, ...(turn.note ? [paint("dim", turn.note)] : [])].join("\n");
 }
 

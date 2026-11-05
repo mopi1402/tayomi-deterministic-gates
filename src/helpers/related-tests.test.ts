@@ -48,6 +48,14 @@ describe("relatedTests", () => {
     assert.deepEqual(relatedTests(repo, ["src/a.ts", "src/c-test.ts"], NODE_TESTS), ["src/a-test.ts", "src/c-test.ts"]);
   });
 
+  test("follows an import of a folder to its index file", () => {
+    write({
+      "src/lib/index.ts": "export const a = 1;",
+      "src/lib-test.ts": 'import { a } from "./lib";\nconsole.log(a);',
+    });
+    assert.deepEqual(relatedTests(repo, ["src/lib/index.ts"], NODE_TESTS), ["src/lib-test.ts"]);
+  });
+
   test("survives an import cycle", () => {
     write({
       "src/a.ts": 'import "./b.ts";\nexport const a = 1;',
