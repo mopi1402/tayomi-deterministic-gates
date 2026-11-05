@@ -79,5 +79,5 @@ export function treeOf(root: string, commit: string): string {
 
 export function changedSince(root: string, start: string, end = snapshot(root)): string[] {
   // -z: one NUL after each path, which git otherwise quotes and escapes when it holds an accent.
-  return git(root, ["diff", "-z", "--name-only", "--diff-filter=d", start, end]).split("\0").filter(Boolean).sort();
+  return git(root, ["diff", "-z", "--name-only", start, end]).split("\0").filter(Boolean).sort();
 }

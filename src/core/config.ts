@@ -42,6 +42,16 @@ function entriesOf(text: string | undefined, file: string): Entry[] {
   });
 }
 
+function isPattern(value: unknown): value is string {
+  if (typeof value !== "string") return false;
+  try {
+    new RegExp(value);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 function toGate(entry: Entry): Gate {
   const { name, severity, files, run, compare, ignoreLines, timeoutSeconds = DEFAULT_TIMEOUT_SECONDS } = entry;
   const unknown = Object.keys(entry).find((key) => !FIELDS.has(key));
@@ -49,11 +59,11 @@ function toGate(entry: Entry): Gate {
   if (!/^[a-z][a-z0-9-]*$/.test(name)) refuse(name, "a name is lowercase words joined by hyphens");
   if (severity !== "error" && severity !== "off")
     refuse(name, 'severity is "error" or "off": a warning sends nobody back to fix it');
-  if (typeof files !== "string") refuse(name, "files is a regular expression on the repo-relative paths");
+  if (!isPattern(files)) refuse(name, "files is a regular expression on the repo-relative paths");
   if (!Array.isArray(run) || !run.length || !run.every((arg): arg is string => typeof arg === "string"))
     refuse(name, "run is a non-empty list of strings");
   if (compare !== undefined && compare !== "turn-start") refuse(name, 'compare is "turn-start"');
-  if (ignoreLines !== undefined && typeof ignoreLines !== "string") refuse(name, "ignoreLines is a regular expression");
+  if (ignoreLines !== undefined && !isPattern(ignoreLines)) refuse(name, "ignoreLines is a regular expression");
   if (typeof timeoutSeconds !== "number" || timeoutSeconds <= 0) refuse(name, "timeoutSeconds is a positive number");
   if (timeoutSeconds > MAX_TIMEOUT_SECONDS)
     refuse(name, `timeoutSeconds is at most ${MAX_TIMEOUT_SECONDS}: a slower check belongs in CI`);

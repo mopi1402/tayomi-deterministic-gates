@@ -164,3 +164,68 @@ describe("a report that broke as the turn started", () => {
     assert.equal(cachedNow(), undefined);
   });
 });
+
+describe("a report that broke as the turn started, after a turn that changed nothing", () => {
+  test("is still not kept: the next turn runs the command again", async () => {
+    writeFileSync(join(repo, "tool.mjs"), 'console.log("boom"); process.exit(2)');
+    gates({ name: "dead", severity: "error", files: "\\.ts$", run: ["tool.mjs"], compare: "turn-start" });
+    await startTurn(session, repo);
+    await checkTurn(session, repo);
+    assert.equal(cachedNow(), undefined);
+  });
+});
+
+describe("a compared gate the agent leaves failing", () => {
+  test("fails the next turn too: what a turn added stays new until it is fixed", async () => {
+    writeFileSync(
+      join(repo, "tool.mjs"),
+      'import { existsSync } from "node:fs"; console.log("fine"); if (existsSync("a.ts")) console.log("unused a");',
+    );
+    gates({ name: "dead", severity: "error", files: "\\.ts$", run: ["tool.mjs"], compare: "turn-start" });
+    await startTurn(session, repo);
+    writeFileSync(join(repo, "a.ts"), "1");
+    assert.equal((await checkTurn(session, repo)).outcomes[0]?.output, "unused a");
+    await startTurn(session, repo);
+    writeFileSync(join(repo, "b.ts"), "1");
+    assert.equal((await checkTurn(session, repo)).outcomes[0]?.output, "unused a");
+  });
+});
+
+describe("a file the turn deleted", () => {
+  const print = 'console.log(process.argv.slice(2).join(" ") || "no file")';
+  const whole = { name: "whole", severity: "error", files: "\\.ts$", run: ["tool.mjs"] };
+  const named = { name: "named", severity: "error", files: "\\.ts$", run: ["tool.mjs", "{files}"] };
+
+  test("runs the gates that look at it, and is never named in {files}", async () => {
+    writeFileSync(join(repo, "tool.mjs"), print);
+    writeFileSync(join(repo, "a.ts"), "1");
+    writeFileSync(join(repo, "b.ts"), "1");
+    gates(whole, named);
+    await startTurn(session, repo);
+    rmSync(join(repo, "a.ts"));
+    writeFileSync(join(repo, "b.ts"), "2");
+    const turn = await checkTurn(session, repo);
+    assert.deepEqual(turn.changed, ["a.ts", "b.ts"]);
+    assert.deepEqual(
+      turn.outcomes.map(({ name, output }) => [name, output]),
+      [
+        ["whole", "no file"],
+        ["named", "b.ts"],
+      ],
+    );
+  });
+
+  test("skips a gate that would have nothing but deleted files to look at", async () => {
+    writeFileSync(join(repo, "tool.mjs"), print);
+    writeFileSync(join(repo, "a.ts"), "1");
+    gates(whole, named);
+    await startTurn(session, repo);
+    rmSync(join(repo, "a.ts"));
+    const turn = await checkTurn(session, repo);
+    assert.deepEqual(
+      turn.outcomes.map(({ name }) => name),
+      ["whole"],
+    );
+    assert.deepEqual(turn.skipped, ["named"]);
+  });
+});

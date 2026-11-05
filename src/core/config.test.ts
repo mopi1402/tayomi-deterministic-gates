@@ -42,6 +42,11 @@ describe("parseGates", () => {
     assert.throws(() => parseGates(file({ ...lint, timeoutSeconds: 180 })), /belongs in CI/);
   });
 
+  test("refuses a files or ignoreLines pattern that is not a regular expression", () => {
+    assert.throws(() => parseGates(file({ ...lint, files: "(" })), /files is a regular expression/);
+    assert.throws(() => parseGates(file({ ...lint, ignoreLines: "(" })), /ignoreLines is a regular expression/);
+  });
+
   test("changes only the fields a local entry gives to the shared gate of its name", () => {
     assert.deepEqual(parseGates(file(lint), file({ name: "lint", timeoutSeconds: 10 })), [
       { ...lint, timeoutSeconds: 10 },

@@ -28,13 +28,13 @@ afterEach(() => {
 });
 
 describe("a turn", () => {
-  test("holds only what changed after its start, untracked files included, ignored ones left out", () => {
+  test("holds what changed after its start, untracked and deleted files included, ignored ones left out", () => {
     const start = snapshot(repo);
     writeFileSync(join(repo, "edited.ts"), "3");
     writeFileSync(join(repo, "new.ts"), "added in the turn");
     writeFileSync(join(repo, "ignored.ts"), "ignored");
     rmSync(join(repo, "removed.ts"));
-    assert.deepEqual(changedSince(repo, start), ["edited.ts", "new.ts"]);
+    assert.deepEqual(changedSince(repo, start), ["edited.ts", "new.ts", "removed.ts"]);
   });
 
   test("names a changed file as it is, accents and spaces included", () => {

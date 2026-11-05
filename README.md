@@ -13,7 +13,7 @@ node src/cli.ts hook turn-start
 node src/cli.ts hook check
 ```
 
-The engine needs Node 24 or later. It has no runtime dependency. It does nothing outside git, or in a repo with no gates file.
+The engine needs Node 24.2 or later. It has no runtime dependency. It does nothing outside git, or in a repo with no gates file.
 
 ### Claude Code
 
@@ -112,15 +112,15 @@ The gates of a repo live in `.gates.json` at its root, committed:
 }
 ```
 
-| Field            | Meaning                                                                                                                                                                                                 |
-| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`           | Lowercase words joined by hyphens.                                                                                                                                                                      |
-| `severity`       | `error` sends the agent back. `off` never runs. There is no warning, because nobody acts on one.                                                                                                        |
-| `files`          | A regular expression on the repo-relative paths. The gate runs only when the turn changed a match.                                                                                                      |
-| `run`            | The command, then its arguments. See below.                                                                                                                                                             |
-| `compare`        | `turn-start`: the command also runs as the turn starts, and only the lines of output the turn added fail the gate. The command exits with 0 when it finds problems. Any other exit code fails the gate. |
-| `ignoreLines`    | A regular expression for lines of output that never count as new, such as a header with a total.                                                                                                        |
-| `timeoutSeconds` | 30 by default, 60 at most. A slower check belongs in CI.                                                                                                                                                |
+| Field            | Meaning                                                                                                                                                                                                                                                      |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `name`           | Lowercase words joined by hyphens.                                                                                                                                                                                                                           |
+| `severity`       | `error` sends the agent back. `off` never runs. There is no warning, because nobody acts on one.                                                                                                                                                             |
+| `files`          | A regular expression on the repo-relative paths. The gate runs only when the turn changed a match, a deleted file included: a gate given `{files}` looks at the files left, and is skipped when none is left.                                                |
+| `run`            | The command, then its arguments. See below.                                                                                                                                                                                                                  |
+| `compare`        | `turn-start`: the command also runs as the turn starts, and only the lines of output the turn added fail the gate, and stay new in the next turns until they are fixed. The command exits with 0 when it finds problems. Any other exit code fails the gate. |
+| `ignoreLines`    | A regular expression for lines of output that never count as new, such as a header with a total.                                                                                                                                                             |
+| `timeoutSeconds` | 30 by default, 60 at most. A slower check belongs in CI.                                                                                                                                                                                                     |
 
 The first word of `run` is looked up in this order, so a gate can run Node, Python, Go or any other program:
 

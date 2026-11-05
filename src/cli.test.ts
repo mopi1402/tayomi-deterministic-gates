@@ -10,8 +10,9 @@ const CLI = join(import.meta.dirname, "cli.ts");
 
 let repo = "";
 
-function cli(...args: string[]) {
-  const { status, stdout, stderr } = spawnSync(process.execPath, [CLI, ...args], { cwd: repo, encoding: "utf8" });
+function cli(args: string[], { input = "", node = [] as string[] } = {}) {
+  const options = { cwd: repo, encoding: "utf8" as const, input };
+  const { status, stdout, stderr } = spawnSync(process.execPath, [...node, CLI, ...args], options);
   return { status, stdout: stripVTControlCharacters(stdout), stderr };
 }
 
@@ -38,7 +39,7 @@ describe("check", () => {
         ],
       }),
     );
-    const { status, stdout } = cli("check");
+    const { status, stdout } = cli(["check"]);
     assert.equal(status, 1);
     assert.match(stdout, /1\/2 gates green/);
     assert.match(stdout, /## red\na problem/);
@@ -52,15 +53,30 @@ describe("check", () => {
       join(repo, ".gates.json"),
       JSON.stringify({ gates: [{ name: "green", severity: "error", files: "\\.ts$", run: ["pass.mjs"] }] }),
     );
-    const { status, stdout } = cli("check");
+    const { status, stdout } = cli(["check"]);
     assert.equal(status, 0);
     assert.match(stdout, /1\/1 gates green/);
   });
 
   test("says so outside git, and exits with 2", () => {
     rmSync(join(repo, ".git"), { recursive: true, force: true });
-    const { status, stderr } = cli("check");
+    const { status, stderr } = cli(["check"]);
     assert.equal(status, 2);
     assert.match(stderr, /not in a git repository/i);
+  });
+});
+
+describe("on a Node before 24.2", () => {
+  test("tells the owner, in the hook and in check, instead of helpers that never run", () => {
+    const old = join(repo, "old-node.cjs");
+    writeFileSync(old, 'Object.defineProperty(process.versions, "node", { value: "24.1.0" });');
+    writeFileSync(join(repo, ".gates.json"), JSON.stringify({ gates: [] }));
+    const input = JSON.stringify({ session_id: "s", cwd: repo });
+    const hook = cli(["hook", "check"], { input, node: ["--require", old] });
+    assert.equal(hook.status, 0);
+    assert.match(hook.stdout, /"systemMessage":".*Node 24\.2 or later is needed, this is 24\.1\.0/);
+    const check = cli(["check"], { node: ["--require", old] });
+    assert.equal(check.status, 2);
+    assert.match(check.stderr, /Node 24\.2 or later is needed, this is 24\.1\.0/);
   });
 });
