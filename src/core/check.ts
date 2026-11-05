@@ -1,10 +1,10 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { changedGatesFiles, type Gate, gatesOf, isCompared, loadGates, readGatesFiles } from "./config.ts";
+import { changedGatesFiles, type Gate, gatesOf, isCompared, readGatesFiles } from "./config.ts";
 import { cachedReports, cacheReports } from "./report-cache.ts";
 import { check, filesOf, givenFiles, type Outcome, wholeProject } from "./run.ts";
-import { changedSince, emptyCommit, hasCommit, lastCommit, snapshot, treeOf } from "./snapshot.ts";
-import { readTurn, writeTurn } from "./turn-state.ts";
+import { changedSince, emptyCommit, hasCommit, lastCommit, snapshot, treeOf, workingTree } from "./snapshot.ts";
+import { readTurn, type TurnState, writeTurn } from "./turn-state.ts";
 
 export interface CheckedTurn {
   changed: string[];
@@ -90,7 +90,7 @@ function checkedTurn(changed: string[], results: Result[], started: number, note
     outcomes: results.flatMap(({ outcome }) => (outcome ? [outcome] : [])),
     skipped: results.filter(({ outcome }) => !outcome).map(({ gate }) => gate.name),
     ms: performance.now() - started,
-    ...(notes.length ? { note: notes.join("\n") } : {}),
+    note: notes.join("\n") || undefined,
   };
 }
 
@@ -103,7 +103,7 @@ export async function checkAll(root: string): Promise<CheckedTurn> {
   const started = performance.now();
   const empty = emptyCommit(root);
   const files = changedSince(root, empty);
-  const results = await runGates(root, loadGates(root), files, empty, () => "");
+  const results = await runGates(root, gatesOf(readGatesFiles(root)), files, empty, () => "");
   return checkedTurn(files, results, started, []);
 }
 
@@ -112,51 +112,50 @@ export async function checkAll(root: string): Promise<CheckedTurn> {
 // keeps none: it may still read a changed file its pattern misses, as knip reads tsconfig.json.
 function endReports(results: Result[], baselines: Baselines) {
   return results.flatMap(({ gate, outcome }) => {
-    if (!isCompared(gate) || !outcome || givenFiles(gate)) return [];
+    if (!isCompared(gate) || !outcome) return [];
     const report = outcome.ok ? outcome.report : baselines(gate);
     return report === undefined ? [] : [[gate, report] as const];
   });
 }
 
-function startNote(recorded: boolean, lost: boolean): string[] {
-  if (lost) return ["turn start lost (history rewritten?): checked every change since the last commit"];
-  if (!recorded) return ["no turn start recorded: checked every change since the last commit"];
-  return [];
-}
-
-function configNote(changedFiles: string[]): string[] {
-  if (!changedFiles.length) return [];
-  return [`the turn changed ${changedFiles.join(" and ")}: checked with the gates as the turn started`];
-}
-
 /**
  * Runs each gate that looks at a file the turn changed, with the gates as the turn started: an agent that weakens
- * them mid-turn changes the next turn, never its own. Without a recorded start, or with one git no longer has, the
- * turn runs from the last commit with the gates of now: checking too much beats leaving a hole.
+ * them mid-turn changes the next turn, never its own. Without a recorded start, the turn runs from the last commit
+ * with the gates of now; with a start git no longer has, from the last commit with the gates and the reports it
+ * started with: checking too much beats leaving a hole.
  */
 export async function checkTurn(session: string, root: string): Promise<CheckedTurn> {
   const recorded = readTurn(session, root);
-  const lost = recorded !== undefined && !hasCommit(root, recorded.start);
-  const usable = lost ? undefined : recorded;
-  const config = readGatesFiles(root);
-  const turn = usable ?? { start: lastCommit(root), baselines: recorded?.baselines ?? {}, config, checked: false };
+  const kept = recorded !== undefined && hasCommit(root, recorded.start) ? recorded : undefined;
+  const startNote =
+    recorded === undefined
+      ? "no turn start recorded: checked every change since the last commit"
+      : kept === undefined
+        ? "turn start lost (history rewritten?): checked every change since the last commit"
+        : undefined;
+  const now = readGatesFiles(root);
+  const turn: TurnState = {
+    start: kept?.start ?? lastCommit(root),
+    baselines: recorded?.baselines ?? {},
+    config: recorded?.config ?? now,
+    checked: false,
+  };
   const baselines: Baselines = (gate) => turn.baselines[gate.name];
   const started = performance.now();
-  const end = snapshot(root);
+  const end = workingTree(root);
   const changed = changedSince(root, turn.start, end);
   const results = await runGates(root, gatesOf(turn.config), changed, turn.start, baselines);
-  // A turn that left the tree as it started leaves the cache too: it holds the reports of that tree, less the broken ones.
-  const endTree = treeOf(root, end);
-  if (treeOf(root, turn.start) !== endTree) cacheReports(root, endTree, endReports(results, baselines));
+  cacheReports(root, end, endReports(results, baselines));
   writeTurn(session, root, { ...turn, checked: true });
   // A compared gate with no report from the turn start can only count its exit code: a green it did not earn is said.
   const uncompared = results
     .filter(({ gate, outcome }) => outcome && isCompared(gate) && baselines(gate) === undefined)
     .map(({ gate }) => `${gate.name} not compared: no report from the turn start, only its exit code counted`);
-  const notes = [
-    ...startNote(recorded !== undefined, lost),
-    ...configNote(changedGatesFiles(turn.config, config)),
-    ...uncompared,
-  ];
+  const notes = [...(startNote ? [startNote] : []), ...configNote(changedGatesFiles(turn.config, now)), ...uncompared];
   return checkedTurn(changed, results, started, notes);
+}
+
+function configNote(changedFiles: string[]): string[] {
+  if (!changedFiles.length) return [];
+  return [`the turn changed ${changedFiles.join(" and ")}: checked with the gates as the turn started`];
 }

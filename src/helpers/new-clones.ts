@@ -1,25 +1,27 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { isRecord } from "../core/json.ts";
+import { isRecord, readJsonFile } from "../core/json.ts";
 import { packageScript } from "../core/run.ts";
 
 // jscpd compared with the tree the turn started from. Its own console report lists every clone of the repo, the old
 // ones included, so this prints only the clones the turn added, one per line.
 
+function refuse(): never {
+  throw new Error("Not a jscpd report.");
+}
 function place(value: unknown): string {
-  if (!isRecord(value)) throw new Error("Not a jscpd report.");
+  if (!isRecord(value)) refuse();
   const { name, start, end } = value;
-  if (typeof name !== "string" || typeof start !== "number" || typeof end !== "number")
-    throw new Error("Not a jscpd report.");
+  if (typeof name !== "string" || typeof start !== "number" || typeof end !== "number") refuse();
   return `${name}:${start}-${end}`;
 }
 
 export function newClones(report: unknown): string[] {
-  if (!isRecord(report) || !Array.isArray(report.duplicates)) throw new Error("Not a jscpd report.");
+  if (!isRecord(report) || !Array.isArray(report.duplicates)) refuse();
   return report.duplicates.flatMap((clone: unknown) => {
-    if (!isRecord(clone)) throw new Error("Not a jscpd report.");
+    if (!isRecord(clone)) refuse();
     const line = `${place(clone.firstFile)} ~ ${place(clone.secondFile)}`;
     return clone.isNew === true ? [line] : [];
   });
@@ -44,7 +46,7 @@ function main(root: string, turn: string): void {
       process.exitCode = 1;
       return;
     }
-    const clones = newClones(JSON.parse(readFileSync(join(output, "jscpd-report.json"), "utf8")));
+    const clones = newClones(readJsonFile(join(output, "jscpd-report.json")));
     if (!clones.length) return;
     console.log(`New clones: factor each one out.\n${clones.join("\n")}`);
     process.exitCode = 1;

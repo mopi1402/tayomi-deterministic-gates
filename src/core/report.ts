@@ -42,17 +42,14 @@ function resultLines({ outcomes, skipped, ms }: CheckedTurn, onFailure: string):
   const passed = outcomes.filter((outcome) => outcome.ok).sort((a, b) => b.ms - a.ms);
   const after = failed.length && onFailure ? ` · ${onFailure}` : "";
   const notRun = skipped.length ? ` · ${skipped.length} skipped` : "";
-  const lines = [
+  const shown = passed.slice(0, SHOWN_PASSES).map((outcome) => gateLine(paint("pass", "✓"), outcome));
+  const rest = passed.length - shown.length;
+  return [
     `${paint(failed.length ? "fail" : "pass", LABEL)}  ${passed.length}/${outcomes.length} gates green in ${duration(ms)}${notRun}${after}`,
     ...failed.map((outcome) => gateLine(paint("fail", "✗"), outcome)),
+    ...(passed.length ? [[...shown, ...(rest > 0 ? [paint("dim", `... +${rest}`)] : [])].join("  ")] : []),
+    ...(skipped.length ? [skippedLine(skipped)] : []),
   ];
-  if (passed.length) {
-    const shown = passed.slice(0, SHOWN_PASSES).map((outcome) => gateLine(paint("pass", "✓"), outcome));
-    const rest = passed.length - shown.length;
-    lines.push([...shown, ...(rest > 0 ? [paint("dim", `... +${rest}`)] : [])].join("  "));
-  }
-  if (skipped.length) lines.push(skippedLine(skipped));
-  return lines;
 }
 
 /**

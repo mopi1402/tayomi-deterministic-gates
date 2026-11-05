@@ -42,6 +42,11 @@ describe("parseGates", () => {
     assert.throws(() => parseGates(file({ ...lint, timeoutSeconds: 180 })), /belongs in CI/);
   });
 
+  test("refuses a compared gate given the files, since it reads the whole project", () => {
+    const dead = { ...lint, run: ["knip", "{files}"], compare: "turn-start" };
+    assert.throws(() => parseGates(file(dead)), /takes no \{files\}/);
+  });
+
   test("refuses a files or ignoreLines pattern that is not a regular expression", () => {
     assert.throws(() => parseGates(file({ ...lint, files: "(" })), /files is a regular expression/);
     assert.throws(() => parseGates(file({ ...lint, ignoreLines: "(" })), /ignoreLines is a regular expression/);

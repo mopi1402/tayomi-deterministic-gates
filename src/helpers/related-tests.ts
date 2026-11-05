@@ -1,38 +1,25 @@
-import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, statSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
+import { listFiles } from "../core/snapshot.ts";
 
 // The node:test tests that a change can break: those that import a changed file, directly or through other files.
 // Node has no "related" mode of its own, where Vitest has one.
 
+const EXTENSIONS = [".ts", ".mts", ".cts", ".js", ".mjs", ".cjs"];
+const EXTENSION = `\\.(${EXTENSIONS.map((extension) => extension.slice(1)).join("|")})`;
+
 /** Node's own naming of test files, the TypeScript ones included. */
-const NODE_TESTS =
-  /(\.test|[-_]test|^test|\/test)\.(ts|mts|cts|js|mjs|cjs)$|\/test\/.*\.(ts|mts|cts|js|mjs|cjs)$|(^|\/)test-[^/]*\.(ts|mts|cts|js|mjs|cjs)$/;
+const NODE_TESTS = new RegExp(
+  `(\\.test|[-_]test|^test|/test)${EXTENSION}$|/test/.*${EXTENSION}$|(^|/)test-[^/]*${EXTENSION}$`,
+);
 
 const SPECIFIERS =
   /(?:^|[\s;])(?:import|export)\b[^'"]*?\bfrom\s*['"]([^'"]+)['"]|(?:^|[\s;])import\s*['"]([^'"]+)['"]/g;
 
-const EXTENSIONS = [".ts", ".mts", ".cts", ".js", ".mjs", ".cjs"];
-
-function files(root: string): string[] {
-  return execFileSync("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard"], {
-    cwd: root,
-    encoding: "utf8",
-  })
-    .split("\0")
-    .filter(Boolean);
-}
-
-function isFile(path: string): boolean {
-  try {
-    return statSync(path).isFile();
-  } catch {
-    return false;
-  }
-}
-
-// A relative specifier, resolved as Node would, with the TypeScript file an import of its .js output names.
-function resolveImport(from: string, specifier: string): string | undefined {
+// A relative specifier, resolved as Node would among the files of the repo, with the TypeScript file an import of
+// its .js output names.
+function resolveImport(files: Set<string>, from: string, specifier: string): string | undefined {
   if (!specifier.startsWith(".")) return undefined;
   const base = resolve(dirname(from), specifier);
   const candidates = [
@@ -42,10 +29,10 @@ function resolveImport(from: string, specifier: string): string | undefined {
     ...(base.endsWith(".mjs") ? [base.replace(/\.mjs$/, ".mts")] : []),
     ...EXTENSIONS.map((extension) => join(base, `index${extension}`)),
   ];
-  return candidates.find(isFile);
+  return candidates.find((candidate) => files.has(candidate));
 }
 
-function importsOf(file: string): string[] {
+function importsOf(files: Set<string>, file: string): string[] {
   let text: string;
   try {
     text = readFileSync(file, "utf8");
@@ -53,26 +40,27 @@ function importsOf(file: string): string[] {
     return [];
   }
   return [...text.matchAll(SPECIFIERS)].flatMap(([, named, bare]) => {
-    const resolved = resolveImport(file, named ?? bare ?? "");
+    const resolved = resolveImport(files, file, named ?? bare ?? "");
     return resolved === undefined ? [] : [resolved];
   });
 }
 
 /** The test files of the repo, by the given naming, that import one of the changed files, directly or not. */
 export function relatedTests(root: string, changed: string[], tests: RegExp): string[] {
+  const files = listFiles(root);
+  const known = new Set(files.map((file) => resolve(root, file)));
   const changedSet = new Set(changed.map((file) => resolve(root, file)));
   const imports = new Map<string, string[]>();
   const reaches = (file: string, seen: Set<string>): boolean => {
     if (changedSet.has(file)) return true;
     if (seen.has(file)) return false;
     seen.add(file);
-    if (!imports.has(file)) imports.set(file, importsOf(file));
+    if (!imports.has(file)) imports.set(file, importsOf(known, file));
     return (imports.get(file) ?? []).some((imported) => reaches(imported, seen));
   };
-  return files(root)
+  return files
     .filter((file) => tests.test(file))
     .filter((file) => reaches(resolve(root, file), new Set()))
-    .map((file) => relative(root, resolve(root, file)))
     .sort();
 }
 

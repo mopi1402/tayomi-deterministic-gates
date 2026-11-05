@@ -29,11 +29,11 @@ function isGatesFiles(value: unknown): value is GatesFiles {
  * than the one it started in, and a prompt from a folder with no gates starts a turn no check looks for.
  */
 interface SessionState {
-  current: string | null;
+  current?: string;
   turns: Record<string, TurnState>;
 }
 
-const EMPTY: SessionState = { current: null, turns: {} };
+const EMPTY: SessionState = { turns: {} };
 
 function stateFile(session: string): string {
   return join(tmpdir(), `gates-session-${session.replace(/[^\w-]/g, "")}.json`);
@@ -52,7 +52,7 @@ function isTurnState(value: unknown): value is TurnState {
 function isSessionState(value: unknown): value is SessionState {
   return (
     isRecord(value) &&
-    (value.current === null || typeof value.current === "string") &&
+    (value.current === undefined || typeof value.current === "string") &&
     isRecord(value.turns) &&
     Object.values(value.turns).every(isTurnState)
   );
@@ -85,7 +85,7 @@ export function writeTurn(session: string, root: string, turn: TurnState): void 
 /** Ends the turn in progress without a check, as a prompt from a folder with no gates, or a failed start, does. */
 export function forgetTurn(session: string): void {
   const state = readSession(session);
-  if (state.current !== null) writeSession(session, { ...state, current: null });
+  if (state.current !== undefined) writeSession(session, { turns: state.turns });
 }
 
 /**
@@ -94,7 +94,7 @@ export function forgetTurn(session: string): void {
  */
 export function turnRoot(session: string, retry: boolean): string | undefined {
   const { current, turns } = readSession(session);
-  if (current === null) return undefined;
+  if (current === undefined) return undefined;
   const turn = turns[current];
   return turn && (!turn.checked || retry) ? current : undefined;
 }

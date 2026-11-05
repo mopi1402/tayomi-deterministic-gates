@@ -1,10 +1,21 @@
 import { execFileSync } from "node:child_process";
-import { cpSync, existsSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 
-function git(root: string, args: string[], env: NodeJS.ProcessEnv = process.env, input?: string): string {
+interface GitOptions {
+  env?: NodeJS.ProcessEnv;
+  input?: string;
+}
+
+/** Runs git in the repo, and gives what it printed, trimmed. */
+function git(root: string, args: string[], { env = process.env, input }: GitOptions = {}): string {
   return execFileSync("git", args, { cwd: root, encoding: "utf8", env, input, stdio: "pipe" }).trim();
+}
+
+// One NUL after each path, which git otherwise quotes and escapes when it holds an accent.
+function paths(printed: string): string[] {
+  return printed.split("\0").filter(Boolean);
 }
 
 export function repoRoot(cwd: string): string | undefined {
@@ -13,6 +24,11 @@ export function repoRoot(cwd: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+/** Every file of the repo, tracked or not, the ignored ones left out. */
+export function listFiles(root: string): string[] {
+  return paths(git(root, ["ls-files", "-z", "--cached", "--others", "--exclude-standard"]));
 }
 
 // A commit that no branch points to, with a fixed identity so it works where git has none configured.
@@ -24,27 +40,32 @@ function commitOf(root: string, tree: string, message: string): string {
     GIT_COMMITTER_NAME: "gates",
     GIT_COMMITTER_EMAIL: "turn@gates.invalid",
   };
-  return git(root, ["commit-tree", tree, "-m", message], identity);
+  return git(root, ["commit-tree", tree, "-m", message], { env: identity });
 }
 
 /**
- * Records the working tree as a commit that no branch points to, untracked files included and ignored files left
- * out. It changes neither the index, nor the files, nor the history.
+ * The tree of the working tree, untracked files included and ignored files left out. It changes neither the index
+ * nor the files.
  */
-export function snapshot(root: string): string {
-  const index = join(tmpdir(), `gates-index-${process.pid}-${Date.now()}`);
-  const env = { ...process.env, GIT_INDEX_FILE: index };
+export function workingTree(root: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "gates-index-"));
+  const env = { ...process.env, GIT_INDEX_FILE: join(dir, "index") };
   try {
     // Seeded from the real index, git hashes only the files changed since it was written: hashing every file of a
     // large repo takes seconds, twice per turn. The copy keeps the date of the real index, since git trusts a file's
     // size and date only when the index is older than the file: a newer date would hide a same-size rewrite.
     const realIndex = resolve(root, git(root, ["rev-parse", "--git-path", "index"]));
-    if (existsSync(realIndex)) cpSync(realIndex, index, { preserveTimestamps: true });
-    git(root, ["add", "--all"], env);
-    return commitOf(root, git(root, ["write-tree"], env), "gates turn");
+    if (existsSync(realIndex)) cpSync(realIndex, env.GIT_INDEX_FILE, { preserveTimestamps: true });
+    git(root, ["add", "--all"], { env });
+    return git(root, ["write-tree"], { env });
   } finally {
-    rmSync(index, { force: true });
+    rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** Records the working tree as a commit that no branch points to, for the tools given the turn. */
+export function snapshot(root: string): string {
+  return commitOf(root, workingTree(root), "gates turn");
 }
 
 /**
@@ -52,7 +73,7 @@ export function snapshot(root: string): string {
  * since the tools given the turn, such as jscpd, resolve a commit and not a tree.
  */
 export function emptyCommit(root: string): string {
-  return commitOf(root, git(root, ["hash-object", "-t", "tree", "--stdin"], process.env, ""), "gates empty");
+  return commitOf(root, git(root, ["hash-object", "-t", "tree", "--stdin"], { input: "" }), "gates empty");
 }
 
 export function lastCommit(root: string): string {
@@ -77,7 +98,7 @@ export function treeOf(root: string, commit: string): string {
   return git(root, ["rev-parse", `${commit}^{tree}`]);
 }
 
-export function changedSince(root: string, start: string, end = snapshot(root)): string[] {
-  // -z: one NUL after each path, which git otherwise quotes and escapes when it holds an accent.
-  return git(root, ["diff", "-z", "--name-only", start, end]).split("\0").filter(Boolean).sort();
+/** The files that differ between two commits or trees, the deleted ones included. */
+export function changedSince(root: string, start: string, end = workingTree(root)): string[] {
+  return paths(git(root, ["diff", "-z", "--name-only", start, end])).sort();
 }

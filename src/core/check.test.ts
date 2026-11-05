@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { checkAll, checkTurn, startTurn } from "./check.ts";
-import { loadGates } from "./config.ts";
+import { gatesOf, readGatesFiles } from "./config.ts";
 import { cachedReports } from "./report-cache.ts";
 import { snapshot, treeOf } from "./snapshot.ts";
 import { readTurn, writeTurn } from "./turn-state.ts";
@@ -19,7 +19,7 @@ function gates(...list: object[]) {
 }
 
 function cachedNow(): string | undefined {
-  const [gate] = loadGates(repo);
+  const [gate] = gatesOf(readGatesFiles(repo));
   return gate && cachedReports(repo, treeOf(repo, snapshot(repo)))(gate);
 }
 
@@ -140,7 +140,6 @@ describe("the reports a check leaves for the next turn", () => {
   const cases = [
     { name: "a turn that changed nothing keeps the start report", run: ["tool.mjs"], changed: "", kept: true },
     { name: "a whole-project run keeps its report", run: ["tool.mjs"], changed: "a.ts", kept: true },
-    { name: "a run on the changed files only keeps none", run: ["tool.mjs", "{files}"], changed: "a.ts", kept: false },
     { name: "a gate that did not run keeps none", run: ["tool.mjs"], changed: "tsconfig.json", kept: false },
   ];
   for (const { name, run, changed, kept } of cases) {

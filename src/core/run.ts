@@ -2,7 +2,7 @@ import { execFile, type ExecFileException } from "node:child_process";
 import { existsSync } from "node:fs";
 import { resolve, sep } from "node:path";
 import { stripVTControlCharacters } from "node:util";
-import { type Gate, isCompared } from "./config.ts";
+import { FILES, type Gate, isCompared, TURN } from "./config.ts";
 import { isRecord, messageOf, readJsonFile } from "./json.ts";
 
 export interface Outcome {
@@ -16,8 +16,6 @@ export interface Outcome {
 const ENGINE = resolve(import.meta.dirname, "..", "..");
 const MAX_OUTPUT_MB = 16;
 const ENGINE_PREFIX = "{engine}/";
-const FILES = "{files}";
-const TURN = "{turn}";
 
 /** How a gate's command starts: the program to execute, the arguments before the gate's own, and why it may be missing. */
 export interface Command {
@@ -35,8 +33,8 @@ const INTERPRETERS: [RegExp, string][] = [
 /** The script of a package of the repo's node_modules, or nothing when the repo does not have the package. */
 export function packageScript(root: string, name: string): string | undefined {
   const dir = resolve(root, "node_modules", name);
-  if (!existsSync(resolve(dir, "package.json"))) return undefined;
   const manifest = readJsonFile(resolve(dir, "package.json"));
+  if (manifest === undefined) return undefined;
   const bin = isRecord(manifest) ? manifest.bin : undefined;
   const commands = isRecord(bin) ? bin : {};
   const script = typeof bin === "string" ? bin : (commands[name] ?? Object.values(commands)[0]);
@@ -94,7 +92,7 @@ export function newLines(before: string, after: string, ignore?: string): string
     .filter((line) => line && !seen.has(line) && !ignored?.test(line));
 }
 
-function execute(root: string, gate: Gate, args: string[]): Promise<{ ok: boolean; output: string; ms: number }> {
+async function execute(root: string, gate: Gate, args: string[]): Promise<{ ok: boolean; output: string; ms: number }> {
   const started = performance.now();
   const [name = ""] = gate.run;
   // A gate that cannot start fails alone: the other gates of the turn still report.
@@ -102,7 +100,7 @@ function execute(root: string, gate: Gate, args: string[]): Promise<{ ok: boolea
   try {
     command = commandOf(root, name);
   } catch (error) {
-    return Promise.resolve({ ok: false, output: messageOf(error), ms: performance.now() - started });
+    return { ok: false, output: messageOf(error), ms: performance.now() - started };
   }
   return new Promise((resolve) => {
     execFile(
@@ -141,13 +139,9 @@ function outputOf(
   return stripVTControlCharacters(printed).split(`${root}${sep}`).join("").trim();
 }
 
-export async function wholeProject(root: string, gate: Gate): Promise<{ ok: boolean; output: string }> {
-  const { ok, output } = await execute(
-    root,
-    gate,
-    gate.run.slice(1).filter((arg) => arg !== FILES),
-  );
-  return { ok, output };
+/** Runs a compared gate on the whole project, as the turn starts. */
+export function wholeProject(root: string, gate: Gate): Promise<{ ok: boolean; output: string }> {
+  return execute(root, gate, gate.run.slice(1));
 }
 
 /**

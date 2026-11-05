@@ -8,6 +8,10 @@ export function isStringRecord(value: unknown): value is Record<string, string> 
   return isRecord(value) && Object.values(value).every((entry) => typeof entry === "string");
 }
 
+export function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
 /** The message of whatever was thrown. */
 export function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);

@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { isRecord, messageOf } from "./json.ts";
+import { isRecord, isStringArray, messageOf } from "./json.ts";
 import { repoRoot } from "./snapshot.ts";
 
 const GATES_FILE = ".gates.json";
@@ -9,6 +9,10 @@ const LOCAL_GATES_FILE = ".gates.local.json";
 const DEFAULT_TIMEOUT_SECONDS = 30;
 const MAX_TIMEOUT_SECONDS = 60;
 const FIELDS = new Set(["name", "severity", "files", "run", "compare", "ignoreLines", "timeoutSeconds"]);
+
+/** In the arguments of a gate: the changed files it looks at, and the commit of the turn start. */
+export const FILES = "{files}";
+export const TURN = "{turn}";
 
 export interface Gate {
   name: string;
@@ -65,9 +69,10 @@ function toGate(entry: Entry): Gate {
   if (severity !== "error" && severity !== "off")
     refuse(name, 'severity is "error" or "off": a warning sends nobody back to fix it');
   if (!isPattern(files)) refuse(name, "files is a regular expression on the repo-relative paths");
-  if (!Array.isArray(run) || !run.length || !run.every((arg): arg is string => typeof arg === "string"))
-    refuse(name, "run is a non-empty list of strings");
+  if (!isStringArray(run) || !run.length) refuse(name, "run is a non-empty list of strings");
   if (compare !== undefined && compare !== "turn-start") refuse(name, 'compare is "turn-start"');
+  if (compare !== undefined && run.includes(FILES))
+    refuse(name, `a compared gate reads the whole project: it takes no ${FILES}`);
   if (ignoreLines !== undefined && !isPattern(ignoreLines)) refuse(name, "ignoreLines is a regular expression");
   if (typeof timeoutSeconds !== "number" || timeoutSeconds <= 0) refuse(name, "timeoutSeconds is a positive number");
   if (timeoutSeconds > MAX_TIMEOUT_SECONDS)
@@ -110,17 +115,11 @@ export interface GatesFiles {
 }
 
 export function readGatesFiles(root: string): GatesFiles {
-  const shared = readIfPresent(join(root, GATES_FILE));
-  const local = readIfPresent(join(root, LOCAL_GATES_FILE));
-  return { ...(shared === undefined ? {} : { shared }), ...(local === undefined ? {} : { local }) };
+  return { shared: readIfPresent(join(root, GATES_FILE)), local: readIfPresent(join(root, LOCAL_GATES_FILE)) };
 }
 
 export function gatesOf({ shared, local }: GatesFiles): Gate[] {
   return parseGates(shared, local);
-}
-
-export function loadGates(root: string): Gate[] {
-  return gatesOf(readGatesFiles(root));
 }
 
 /** The gates files a turn changed, by name: a turn is checked with the gates it started with, whatever it did to them. */

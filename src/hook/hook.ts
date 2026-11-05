@@ -43,18 +43,15 @@ function cannotRun(error: unknown): HookOutput {
   return { systemMessage: broken(messageOf(error)) };
 }
 
-/** A prompt from a folder with no gates, or whose turn cannot start, begins a turn no check will look for. */
+/** A prompt ends the turn in progress; from a folder with no gates, or when the turn cannot start, no check will look for a new one. */
 async function promptHook(session: string, cwd: string): Promise<HookOutput | undefined> {
+  forgetTurn(session);
   const root = configuredRoot(cwd);
-  if (root === undefined) {
-    forgetTurn(session);
-    return undefined;
-  }
+  if (root === undefined) return undefined;
   try {
     await startTurn(session, root);
     return undefined;
   } catch (error) {
-    forgetTurn(session);
     return cannotRun(error);
   }
 }
