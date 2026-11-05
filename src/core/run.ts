@@ -135,7 +135,9 @@ function outputOf(
     return `Timed out after ${gate.timeoutSeconds} s: too slow for the end of a turn. Make it faster, or move it to CI.`;
   if (error?.code === "ENOENT") return command.missing;
   // Some tools colour despite NO_COLOR, and absolute paths only cost the agent tokens.
-  return stripVTControlCharacters(printed).split(`${root}${sep}`).join("").trim();
+  const said = stripVTControlCharacters(printed).split(`${root}${sep}`).join("").trim();
+  if (said || !error) return said;
+  return `exit code ${String(error.code)}, no output`;
 }
 
 /** Runs a compared gate on the whole project, as the turn starts. */

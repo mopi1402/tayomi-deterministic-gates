@@ -81,6 +81,16 @@
         "run": ["golangci-lint", "run", "--new-from-rev", "{turn}"],
         "timeoutSeconds": 60
       }
+    },
+    {
+      "description": "Fails on the rule suppressions the turn added, never on the ones already there: nolint and go:nolint. The cheapest green is to silence the rule, and this is the gate that refuses it.",
+      "requires": [],
+      "gate": {
+        "name": "no-new-suppressions",
+        "severity": "error",
+        "files": "\\.go$",
+        "run": ["{engine}/src/helpers/new-suppressions.ts", "{turn}", "{files}"]
+      }
     }
   ]
 }

@@ -40,7 +40,7 @@ summary { cursor: pointer; color: var(--muted); }
 <h1>Gate catalog</h1>
 <p>The gates worth copying into a repo. Nothing here runs by itself: the engine reads only the repo's <code>.gates.json</code>. Copy the definition of a gate there, install what it requires, and adapt its <code>files</code> to the layout of the repo.</p>
 <p>Generated from <code>catalog/*.json</code> by <code>pnpm catalog</code>: edit those files, never this page.</p>
-<nav><a href="#go">Go (5)</a><a href="#python">Python (2)</a><a href="#typescript">TypeScript (7)</a></nav>
+<nav><a href="#go">Go (6)</a><a href="#python">Python (3)</a><a href="#typescript">TypeScript (8)</a></nav>
 </header>
 <section id="go">
 <h2>Go</h2>
@@ -146,6 +146,25 @@ summary { cursor: pointer; color: var(--muted); }
   &quot;timeoutSeconds&quot;: 60
 }</code></pre></details>
 </article>
+<article id="go/no-new-suppressions">
+<h3><code>go/no-new-suppressions</code></h3>
+<p>Fails on the rule suppressions the turn added, never on the ones already there: nolint and go:nolint. The cheapest green is to silence the rule, and this is the gate that refuses it.</p>
+<dl>
+<dt>Runs</dt><dd><code>{engine}/src/helpers/new-suppressions.ts {turn} {files}</code></dd>
+<dt>When the turn changes</dt><dd><code>\.go$</code></dd>
+<dt>Requires</dt><dd><ul></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;no-new-suppressions&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;\\.go$&quot;,
+  &quot;run&quot;: [
+    &quot;{engine}/src/helpers/new-suppressions.ts&quot;,
+    &quot;{turn}&quot;,
+    &quot;{files}&quot;
+  ]
+}</code></pre></details>
+</article>
 </section>
 <section id="python">
 <h2>Python</h2>
@@ -185,6 +204,25 @@ summary { cursor: pointer; color: var(--muted); }
     &quot;ruff&quot;,
     &quot;format&quot;,
     &quot;--check&quot;,
+    &quot;{files}&quot;
+  ]
+}</code></pre></details>
+</article>
+<article id="python/no-new-suppressions">
+<h3><code>python/no-new-suppressions</code></h3>
+<p>Fails on the rule suppressions the turn added, never on the ones already there: noqa, type: ignore, pylint: disable, fmt: off, nosec, no cover. The cheapest green is to silence the rule, and this is the gate that refuses it.</p>
+<dl>
+<dt>Runs</dt><dd><code>{engine}/src/helpers/new-suppressions.ts {turn} {files}</code></dd>
+<dt>When the turn changes</dt><dd><code>\.py$</code></dd>
+<dt>Requires</dt><dd><ul></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;no-new-suppressions&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;\\.py$&quot;,
+  &quot;run&quot;: [
+    &quot;{engine}/src/helpers/new-suppressions.ts&quot;,
+    &quot;{turn}&quot;,
     &quot;{files}&quot;
   ]
 }</code></pre></details>
@@ -339,6 +377,25 @@ summary { cursor: pointer; color: var(--muted); }
   ],
   &quot;compare&quot;: &quot;turn-start&quot;,
   &quot;ignoreLines&quot;: &quot;\\(\\d+\\)$&quot;
+}</code></pre></details>
+</article>
+<article id="typescript/no-new-suppressions">
+<h3><code>typescript/no-new-suppressions</code></h3>
+<p>Fails on the rule suppressions the turn added, never on the ones already there: eslint-disable, @ts-ignore, @ts-expect-error, @ts-nocheck, prettier-ignore, biome-ignore. The cheapest green is to silence the rule, and this is the gate that refuses it.</p>
+<dl>
+<dt>Runs</dt><dd><code>{engine}/src/helpers/new-suppressions.ts {turn} {files}</code></dd>
+<dt>When the turn changes</dt><dd><code>\.(ts|tsx|js|jsx|mjs|cjs)$</code></dd>
+<dt>Requires</dt><dd><ul></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;no-new-suppressions&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;\\.(ts|tsx|js|jsx|mjs|cjs)$&quot;,
+  &quot;run&quot;: [
+    &quot;{engine}/src/helpers/new-suppressions.ts&quot;,
+    &quot;{turn}&quot;,
+    &quot;{files}&quot;
+  ]
 }</code></pre></details>
 </article>
 </section>

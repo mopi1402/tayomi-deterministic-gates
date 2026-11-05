@@ -113,6 +113,13 @@ describe("check, on any language", () => {
     assert.match(outcome.output, /no-such-tool is not installed/);
   });
 
+  test("says the exit code of a gate that fails without a word, instead of an empty report", async () => {
+    tool("process.exit(3)");
+    const outcome = await check(root, { ...LINT, run: ["tool.mjs"] }, ["a.ts"], "abc", undefined);
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.output, "exit code 3, no output");
+  });
+
   test("fails on a report too long to read, and says so instead of a timeout", async () => {
     tool('process.stdout.write("x".repeat(17 * 1024 * 1024))');
     const outcome = await check(root, COMPARED, [], "abc", undefined);

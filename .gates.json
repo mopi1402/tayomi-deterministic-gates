@@ -46,6 +46,12 @@
       "run": ["knip", "--reporter", "compact", "--no-exit-code", "--no-progress"],
       "compare": "turn-start",
       "ignoreLines": "\\(\\d+\\)$"
+    },
+    {
+      "name": "no-new-suppressions",
+      "severity": "error",
+      "files": "^(?!src/helpers/new-suppressions|src/core/report\\.|integration/).*\\.ts$",
+      "run": ["{engine}/src/helpers/new-suppressions.ts", "{turn}", "{files}"]
     }
   ]
 }

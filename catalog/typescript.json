@@ -112,6 +112,16 @@
         "compare": "turn-start",
         "ignoreLines": "\\(\\d+\\)$"
       }
+    },
+    {
+      "description": "Fails on the rule suppressions the turn added, never on the ones already there: eslint-disable, @ts-ignore, @ts-expect-error, @ts-nocheck, prettier-ignore, biome-ignore. The cheapest green is to silence the rule, and this is the gate that refuses it.",
+      "requires": [],
+      "gate": {
+        "name": "no-new-suppressions",
+        "severity": "error",
+        "files": "\\.(ts|tsx|js|jsx|mjs|cjs)$",
+        "run": ["{engine}/src/helpers/new-suppressions.ts", "{turn}", "{files}"]
+      }
     }
   ]
 }

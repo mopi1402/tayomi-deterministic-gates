@@ -31,6 +31,16 @@
         "files": "\\.py$",
         "run": ["ruff", "format", "--check", "{files}"]
       }
+    },
+    {
+      "description": "Fails on the rule suppressions the turn added, never on the ones already there: noqa, type: ignore, pylint: disable, fmt: off, nosec, no cover. The cheapest green is to silence the rule, and this is the gate that refuses it.",
+      "requires": [],
+      "gate": {
+        "name": "no-new-suppressions",
+        "severity": "error",
+        "files": "\\.py$",
+        "run": ["{engine}/src/helpers/new-suppressions.ts", "{turn}", "{files}"]
+      }
     }
   ]
 }

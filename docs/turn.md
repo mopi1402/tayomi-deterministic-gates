@@ -36,7 +36,7 @@ The engine keeps what it knows in the temporary folder of the system: the turn o
 
 ## What the lock covers
 
-A turn is checked with the gates as it started: an agent that edits `.gates.json` or `.gates.local.json` mid-turn changes the next turn, never its own, and the summary says so. This covers the two gates files alone. The configuration of a tool, such as `tsconfig.json` or `eslint.config.js`, is read as it is when the gate runs, and only the conduct the agent is told keeps it from weakening one.
+A turn is checked with the gates as it started: an agent that edits `.gates.json` or `.gates.local.json` mid-turn changes the next turn, never its own, and the summary says so. This covers the two gates files alone. The configuration of a tool, such as `tsconfig.json` or `eslint.config.js`, is read as it is when the gate runs, and only the conduct the agent is told keeps it from weakening one. The `no-new-suppressions` gate of the catalog refuses the other way out, the rule silenced in the code.
 
 ## The whole check
 

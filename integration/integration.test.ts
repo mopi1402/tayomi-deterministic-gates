@@ -83,6 +83,14 @@ const SAMPLES: Record<string, Sample> = {
             "export function add(a: number, b: number): number {\n  return a + b;\n}\n\nexport function unused(): number {\n  return 0;\n}\n",
         },
       },
+      {
+        gate: "no-new-suppressions",
+        what: "a lint rule silenced",
+        edits: {
+          "src/add.ts":
+            "// eslint-disable-next-line no-unused-vars\nexport function add(a: number, b: number): number {\n  return a + b;\n}\n",
+        },
+      },
     ],
   },
   go: {
@@ -112,6 +120,11 @@ const SAMPLES: Record<string, Sample> = {
         edits: { "sum.go": "package main\n\nfunc Sum(a, b int) int {\n\treturn a - b\n}\n" },
       },
       { gate: "lint", what: "a function nothing calls", edits: { "unused.go": "package main\n\nfunc unused() {}\n" } },
+      {
+        gate: "no-new-suppressions",
+        what: "a lint rule silenced",
+        edits: { "sum.go": "package main\n\n//nolint:all\nfunc Sum(a, b int) int {\n\treturn a + b\n}\n" },
+      },
     ],
   },
   python: {
@@ -128,6 +141,13 @@ const SAMPLES: Record<string, Sample> = {
         gate: "format",
         what: "a file Ruff would reformat",
         edits: { "greet.py": 'def greet(name:str)->str:\n    return f"Hello, {name}!"\n' },
+      },
+      {
+        gate: "no-new-suppressions",
+        what: "a lint rule silenced",
+        edits: {
+          "greet.py": 'import os  # noqa: F401\n\n\ndef greet(name: str) -> str:\n    return f"Hello, {name}!"\n',
+        },
       },
     ],
   },
