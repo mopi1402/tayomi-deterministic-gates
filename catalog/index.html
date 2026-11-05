@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gate catalog</title>
+<style>
+:root { --bg: #fafaf9; --panel: #ffffff; --text: #1c1917; --muted: #57534e; --line: #e7e5e4; --code: #f5f5f4;
+  --link: #1d4ed8; }
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #1c1917; --panel: #262321; --text: #f5f5f4; --muted: #a8a29e; --line: #3f3a36; --code: #2f2a27;
+    --link: #93c5fd; }
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.55 system-ui, sans-serif; }
+main { max-width: 860px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { margin: 0 0 8px; font-size: 1.9rem; }
+h2 { margin: 48px 0 4px; font-size: 1.4rem; }
+h3 { margin: 0; font-size: 1rem; }
+p, dd, li { color: var(--muted); }
+a { color: var(--link); }
+nav { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+nav a { padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; text-decoration: none; }
+article { margin: 16px 0; padding: 16px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 16px; margin: 12px 0; }
+dt { font-weight: 600; }
+dd { margin: 0; min-width: 0; }
+dd ul { margin: 0; padding-left: 18px; }
+code { font: 0.88em/1.4 ui-monospace, monospace; background: var(--code); padding: 1px 5px; border-radius: 4px;
+  overflow-wrap: anywhere; }
+pre { overflow-x: auto; background: var(--code); padding: 12px; border-radius: 8px; }
+pre code { padding: 0; }
+summary { cursor: pointer; color: var(--muted); }
+@media (max-width: 560px) { dl { grid-template-columns: 1fr; } dd { margin-bottom: 8px; } }
+</style>
+</head>
+<body>
+<main>
+<header>
+<h1>Gate catalog</h1>
+<p>The gates worth copying into a repo. Nothing here runs by itself: the engine reads only the repo's <code>.gates.json</code>. Copy the definition of a gate there, install what it requires, and adapt its <code>files</code> to the layout of the repo.</p>
+<p>Generated from <code>catalog/*.json</code> by <code>npm run catalog</code>: edit those files, never this page.</p>
+<nav><a href="#go">Go (5)</a><a href="#python">Python (2)</a><a href="#typescript">TypeScript (7)</a></nav>
+</header>
+<section id="go">
+<h2>Go</h2>
+<p>Gates for a Go module. The toolchain comes from the PATH. The first build of a cold cache is slow, which is why these gates allow 60 seconds.</p>
+<article id="go/build">
+<h3><code>go/build</code></h3>
+<p>Builds every package of the module.</p>
+<dl>
+<dt>Runs</dt><dd><code>go build ./...</code></dd>
+<dt>When the turn changes</dt><dd><code>(\.go|(^|/)go\.(mod|sum))$</code></dd>
+<dt>Requires</dt><dd><ul><li><code>go</code>: <a href="https://go.dev/doc/install">https://go.dev/doc/install</a></li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;build&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;(\\.go|(^|/)go\\.(mod|sum))$&quot;,
+  &quot;run&quot;: [
+    &quot;go&quot;,
+    &quot;build&quot;,
+    &quot;./...&quot;
+  ],
+  &quot;timeoutSeconds&quot;: 60
+}</code></pre></details>
+</article>
+<article id="go/vet">
+<h3><code>go/vet</code></h3>
+<p>Runs go vet on every package: the suspicious constructs the compiler accepts.</p>
+<dl>
+<dt>Runs</dt><dd><code>go vet ./...</code></dd>
+<dt>When the turn changes</dt><dd><code>(\.go|(^|/)go\.(mod|sum))$</code></dd>
+<dt>Requires</dt><dd><ul><li><code>go</code>: <a href="https://go.dev/doc/install">https://go.dev/doc/install</a></li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;vet&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;(\\.go|(^|/)go\\.(mod|sum))$&quot;,
+  &quot;run&quot;: [
+    &quot;go&quot;,
+    &quot;vet&quot;,
+    &quot;./...&quot;
+  ],
+  &quot;timeoutSeconds&quot;: 60
+}</code></pre></details>
+</article>
+<article id="go/format">
+<h3><code>go/format</code></h3>
+<p>Fails on the files the turn left unformatted. gofmt -l lists them and exits with 0, so the gate compares its list with the one as the turn started.</p>
+<dl>
+<dt>Runs</dt><dd><code>gofmt -l .</code></dd>
+<dt>When the turn changes</dt><dd><code>\.go$</code></dd>
+<dt>Fails on</dt><dd>only the output lines the turn added</dd><dt>Requires</dt><dd><ul><li><code>gofmt</code>: comes with Go: <a href="https://go.dev/doc/install">https://go.dev/doc/install</a></li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;format&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;\\.go$&quot;,
+  &quot;run&quot;: [
+    &quot;gofmt&quot;,
+    &quot;-l&quot;,
+    &quot;.&quot;
+  ],
+  &quot;compare&quot;: &quot;turn-start&quot;
+}</code></pre></details>
+</article>
+<article id="go/test">
+<h3><code>go/test</code></h3>
+<p>Runs the tests of every package. Go caches the result of a package that did not change, so only the packages the turn touched run again.</p>
+<dl>
+<dt>Runs</dt><dd><code>go test ./...</code></dd>
+<dt>When the turn changes</dt><dd><code>(\.go|(^|/)go\.(mod|sum))$</code></dd>
+<dt>Requires</dt><dd><ul><li><code>go</code>: <a href="https://go.dev/doc/install">https://go.dev/doc/install</a></li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;test&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;(\\.go|(^|/)go\\.(mod|sum))$&quot;,
+  &quot;run&quot;: [
+    &quot;go&quot;,
+    &quot;test&quot;,
+    &quot;./...&quot;
+  ],
+  &quot;timeoutSeconds&quot;: 60
+}</code></pre></details>
+</article>
+<article id="go/lint">
+<h3><code>go/lint</code></h3>
+<p>Lints with golangci-lint, and reports only the issues created since the turn started (--new-from-rev).</p>
+<dl>
+<dt>Runs</dt><dd><code>golangci-lint run --new-from-rev {turn}</code></dd>
+<dt>When the turn changes</dt><dd><code>\.go$</code></dd>
+<dt>Requires</dt><dd><ul><li><code>golangci-lint</code>: <a href="https://golangci-lint.run/docs/welcome/install/">https://golangci-lint.run/docs/welcome/install/</a></li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;lint&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;\\.go$&quot;,
+  &quot;run&quot;: [
+    &quot;golangci-lint&quot;,
+    &quot;run&quot;,
+    &quot;--new-from-rev&quot;,
+    &quot;{turn}&quot;
+  ],
+  &quot;timeoutSeconds&quot;: 60
+}</code></pre></details>
+</article>
+</section>
+<section id="python">
+<h2>Python</h2>
+<p>Gates for Python files, such as the scripts of skills. Ruff comes from the PATH. In a project managed by uv, write uv run ruff instead, to run the version the project pins.</p>
+<article id="python/lint">
+<h3><code>python/lint</code></h3>
+<p>Lints the changed files with Ruff.</p>
+<dl>
+<dt>Runs</dt><dd><code>ruff check {files}</code></dd>
+<dt>When the turn changes</dt><dd><code>\.py$</code></dd>
+<dt>Requires</dt><dd><ul><li><code>ruff</code>: uv tool install ruff, pipx install ruff, or brew install ruff</li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;lint&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;\\.py$&quot;,
+  &quot;run&quot;: [
+    &quot;ruff&quot;,
+    &quot;check&quot;,
+    &quot;{files}&quot;
+  ]
+}</code></pre></details>
+</article>
+<article id="python/format">
+<h3><code>python/format</code></h3>
+<p>Checks that the Ruff formatter leaves the changed files as they are.</p>
+<dl>
+<dt>Runs</dt><dd><code>ruff format --check {files}</code></dd>
+<dt>When the turn changes</dt><dd><code>\.py$</code></dd>
+<dt>Requires</dt><dd><ul><li><code>ruff</code>: uv tool install ruff, pipx install ruff, or brew install ruff</li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;format&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;\\.py$&quot;,
+  &quot;run&quot;: [
+    &quot;ruff&quot;,
+    &quot;format&quot;,
+    &quot;--check&quot;,
+    &quot;{files}&quot;
+  ]
+}</code></pre></details>
+</article>
+</section>
+<section id="typescript">
+<h2>TypeScript</h2>
+<p>Gates for a TypeScript or JavaScript repo. Each tool comes from the repo's node_modules, so its version is the one the lockfile pins.</p>
+<article id="typescript/lint">
+<h3><code>typescript/lint</code></h3>
+<p>Lints the changed files with ESLint, warnings included: a warning nobody is sent back for is never fixed.</p>
+<dl>
+<dt>Runs</dt><dd><code>eslint --max-warnings 0 --no-warn-ignored {files}</code></dd>
+<dt>When the turn changes</dt><dd><code>\.(ts|tsx|js|mjs)$</code></dd>
+<dt>Requires</dt><dd><ul><li><code>eslint</code>: npm install --save-dev eslint</li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;lint&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;\\.(ts|tsx|js|mjs)$&quot;,
+  &quot;run&quot;: [
+    &quot;eslint&quot;,
+    &quot;--max-warnings&quot;,
+    &quot;0&quot;,
+    &quot;--no-warn-ignored&quot;,
+    &quot;{files}&quot;
+  ]
+}</code></pre></details>
+</article>
+<article id="typescript/typecheck">
+<h3><code>typescript/typecheck</code></h3>
+<p>Type-checks the project with tsc, since a change in one file can break the types of another. Incremental: tsc keeps what it learnt under node_modules/.cache and re-checks only what the changed files reach.</p>
+<dl>
+<dt>Runs</dt><dd><code>typescript --pretty false --incremental --tsBuildInfoFile node_modules/.cache/gates/tsbuildinfo</code></dd>
+<dt>When the turn changes</dt><dd><code>(\.(ts|tsx)|^tsconfig\.json)$</code></dd>
+<dt>Requires</dt><dd><ul><li><code>typescript</code>: npm install --save-dev typescript</li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;typecheck&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;(\\.(ts|tsx)|^tsconfig\\.json)$&quot;,
+  &quot;run&quot;: [
+    &quot;typescript&quot;,
+    &quot;--pretty&quot;,
+    &quot;false&quot;,
+    &quot;--incremental&quot;,
+    &quot;--tsBuildInfoFile&quot;,
+    &quot;node_modules/.cache/gates/tsbuildinfo&quot;
+  ]
+}</code></pre></details>
+</article>
+<article id="typescript/format">
+<h3><code>typescript/format</code></h3>
+<p>Checks that Prettier leaves the changed files as they are.</p>
+<dl>
+<dt>Runs</dt><dd><code>prettier --check --log-level warn --no-error-on-unmatched-pattern {files}</code></dd>
+<dt>When the turn changes</dt><dd><code>\.(ts|tsx|js|mjs|json|md|css|ya?ml)$</code></dd>
+<dt>Requires</dt><dd><ul><li><code>prettier</code>: npm install --save-dev prettier</li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;format&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;\\.(ts|tsx|js|mjs|json|md|css|ya?ml)$&quot;,
+  &quot;run&quot;: [
+    &quot;prettier&quot;,
+    &quot;--check&quot;,
+    &quot;--log-level&quot;,
+    &quot;warn&quot;,
+    &quot;--no-error-on-unmatched-pattern&quot;,
+    &quot;{files}&quot;
+  ]
+}</code></pre></details>
+</article>
+<article id="typescript/related-tests">
+<h3><code>typescript/related-tests</code></h3>
+<p>Runs only the Vitest tests that import a changed file, directly or not.</p>
+<dl>
+<dt>Runs</dt><dd><code>vitest related --run --passWithNoTests --reporter=minimal {files}</code></dd>
+<dt>When the turn changes</dt><dd><code>\.(ts|tsx)$</code></dd>
+<dt>Requires</dt><dd><ul><li><code>vitest</code>: npm install --save-dev vitest</li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;related-tests&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;\\.(ts|tsx)$&quot;,
+  &quot;run&quot;: [
+    &quot;vitest&quot;,
+    &quot;related&quot;,
+    &quot;--run&quot;,
+    &quot;--passWithNoTests&quot;,
+    &quot;--reporter=minimal&quot;,
+    &quot;{files}&quot;
+  ],
+  &quot;timeoutSeconds&quot;: 60
+}</code></pre></details>
+</article>
+<article id="typescript/related-node-tests">
+<h3><code>typescript/related-node-tests</code></h3>
+<p>Runs only the node:test tests that import a changed file, directly or not, for a repo that tests with Node itself. Node has no related mode: the helper follows the imports. It finds the tests by Node's own naming; --tests &lt;regex&gt; narrows it.</p>
+<dl>
+<dt>Runs</dt><dd><code>{engine}/src/helpers/related-tests.ts {files}</code></dd>
+<dt>When the turn changes</dt><dd><code>\.(ts|mts|cts|js|mjs|cjs)$</code></dd>
+<dt>Requires</dt><dd><ul></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;related-node-tests&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;\\.(ts|mts|cts|js|mjs|cjs)$&quot;,
+  &quot;run&quot;: [
+    &quot;{engine}/src/helpers/related-tests.ts&quot;,
+    &quot;{files}&quot;
+  ],
+  &quot;timeoutSeconds&quot;: 60
+}</code></pre></details>
+</article>
+<article id="typescript/no-new-clones">
+<h3><code>typescript/no-new-clones</code></h3>
+<p>Fails on the copy-pasted blocks the turn added, never on the ones already there. An agent that misses an existing helper writes a second one, and the two drift apart.</p>
+<dl>
+<dt>Runs</dt><dd><code>{engine}/src/helpers/new-clones.ts {turn}</code></dd>
+<dt>When the turn changes</dt><dd><code>\.(ts|tsx)$</code></dd>
+<dt>Requires</dt><dd><ul><li><code>jscpd</code>: npm install --save-dev jscpd</li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;no-new-clones&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;\\.(ts|tsx)$&quot;,
+  &quot;run&quot;: [
+    &quot;{engine}/src/helpers/new-clones.ts&quot;,
+    &quot;{turn}&quot;
+  ]
+}</code></pre></details>
+</article>
+<article id="typescript/no-new-dead-code">
+<h3><code>typescript/no-new-dead-code</code></h3>
+<p>Fails on the unused files, exports and dependencies the turn added, never on the ones already there, so it works on a repo that already has some.</p>
+<dl>
+<dt>Runs</dt><dd><code>knip --reporter compact --no-exit-code --no-progress</code></dd>
+<dt>When the turn changes</dt><dd><code>(\.(ts|tsx)|^package\.json|^knip\.json)$</code></dd>
+<dt>Fails on</dt><dd>only the output lines the turn added</dd><dt>Requires</dt><dd><ul><li><code>knip</code>: npm install --save-dev knip</li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;no-new-dead-code&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;(\\.(ts|tsx)|^package\\.json|^knip\\.json)$&quot;,
+  &quot;run&quot;: [
+    &quot;knip&quot;,
+    &quot;--reporter&quot;,
+    &quot;compact&quot;,
+    &quot;--no-exit-code&quot;,
+    &quot;--no-progress&quot;
+  ],
+  &quot;compare&quot;: &quot;turn-start&quot;,
+  &quot;ignoreLines&quot;: &quot;\\(\\d+\\)$&quot;
+}</code></pre></details>
+</article>
+</section>
+</main>
+</body>
+</html>

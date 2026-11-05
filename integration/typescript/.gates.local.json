@@ -1,0 +1,8 @@
+{
+  "gates": [
+    {
+      "name": "related-node-tests",
+      "run": ["{engine}/src/helpers/related-tests.ts", "--tests", "-test\\.ts$", "{files}"]
+    }
+  ]
+}

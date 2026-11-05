@@ -1,0 +1,15 @@
+{
+  "name": "tayomi-deterministic-gates",
+  "owner": {
+    "name": "Pierre Moati",
+    "url": "https://github.com/mopi1402"
+  },
+  "plugins": [
+    {
+      "name": "deterministic-gates",
+      "source": "./",
+      "description": "Gates that run on what each turn changed and send the agent back until they pass.",
+      "version": "0.1.0"
+    }
+  ]
+}

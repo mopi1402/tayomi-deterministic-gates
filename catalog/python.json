@@ -1,0 +1,36 @@
+{
+  "title": "Python",
+  "description": "Gates for Python files, such as the scripts of skills. Ruff comes from the PATH. In a project managed by uv, write uv run ruff instead, to run the version the project pins.",
+  "gates": [
+    {
+      "description": "Lints the changed files with Ruff.",
+      "requires": [
+        {
+          "tool": "ruff",
+          "install": "uv tool install ruff, pipx install ruff, or brew install ruff"
+        }
+      ],
+      "gate": {
+        "name": "lint",
+        "severity": "error",
+        "files": "\\.py$",
+        "run": ["ruff", "check", "{files}"]
+      }
+    },
+    {
+      "description": "Checks that the Ruff formatter leaves the changed files as they are.",
+      "requires": [
+        {
+          "tool": "ruff",
+          "install": "uv tool install ruff, pipx install ruff, or brew install ruff"
+        }
+      ],
+      "gate": {
+        "name": "format",
+        "severity": "error",
+        "files": "\\.py$",
+        "run": ["ruff", "format", "--check", "{files}"]
+      }
+    }
+  ]
+}

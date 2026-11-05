@@ -1,0 +1,4 @@
+{
+  "ignore": ["catalog/index.html"],
+  "ignorePattern": ["import .*"]
+}

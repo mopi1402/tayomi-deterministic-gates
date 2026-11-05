@@ -1,0 +1,7 @@
+{
+  "ignoreDependencies": ["jscpd"],
+  "workspaces": {
+    ".": {},
+    "integration/typescript": { "ignoreDependencies": ["jscpd", "prettier"] }
+  }
+}

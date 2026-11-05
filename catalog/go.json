@@ -1,0 +1,86 @@
+{
+  "title": "Go",
+  "description": "Gates for a Go module. The toolchain comes from the PATH. The first build of a cold cache is slow, which is why these gates allow 60 seconds.",
+  "gates": [
+    {
+      "description": "Builds every package of the module.",
+      "requires": [
+        {
+          "tool": "go",
+          "install": "https://go.dev/doc/install"
+        }
+      ],
+      "gate": {
+        "name": "build",
+        "severity": "error",
+        "files": "(\\.go|(^|/)go\\.(mod|sum))$",
+        "run": ["go", "build", "./..."],
+        "timeoutSeconds": 60
+      }
+    },
+    {
+      "description": "Runs go vet on every package: the suspicious constructs the compiler accepts.",
+      "requires": [
+        {
+          "tool": "go",
+          "install": "https://go.dev/doc/install"
+        }
+      ],
+      "gate": {
+        "name": "vet",
+        "severity": "error",
+        "files": "(\\.go|(^|/)go\\.(mod|sum))$",
+        "run": ["go", "vet", "./..."],
+        "timeoutSeconds": 60
+      }
+    },
+    {
+      "description": "Fails on the files the turn left unformatted. gofmt -l lists them and exits with 0, so the gate compares its list with the one as the turn started.",
+      "requires": [
+        {
+          "tool": "gofmt",
+          "install": "comes with Go: https://go.dev/doc/install"
+        }
+      ],
+      "gate": {
+        "name": "format",
+        "severity": "error",
+        "files": "\\.go$",
+        "run": ["gofmt", "-l", "."],
+        "compare": "turn-start"
+      }
+    },
+    {
+      "description": "Runs the tests of every package. Go caches the result of a package that did not change, so only the packages the turn touched run again.",
+      "requires": [
+        {
+          "tool": "go",
+          "install": "https://go.dev/doc/install"
+        }
+      ],
+      "gate": {
+        "name": "test",
+        "severity": "error",
+        "files": "(\\.go|(^|/)go\\.(mod|sum))$",
+        "run": ["go", "test", "./..."],
+        "timeoutSeconds": 60
+      }
+    },
+    {
+      "description": "Lints with golangci-lint, and reports only the issues created since the turn started (--new-from-rev).",
+      "requires": [
+        {
+          "tool": "golangci-lint",
+          "install": "https://golangci-lint.run/docs/welcome/install/"
+        }
+      ],
+      "gate": {
+        "name": "lint",
+        "severity": "error",
+        "files": "\\.go$",
+        "run": ["golangci-lint", "run", "--new-from-rev", "{turn}"],
+        "timeoutSeconds": 60
+      }
+    }
+  ]
+}

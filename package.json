@@ -1,0 +1,45 @@
+{
+  "name": "@tayomi/deterministic-gates",
+  "version": "0.1.0",
+  "description": "Deterministic backpressure for coding agents: gates that run on what each turn changed and send the agent back until they pass.",
+  "type": "module",
+  "license": "MIT",
+  "author": {
+    "name": "Pierre Moati",
+    "url": "https://github.com/mopi1402"
+  },
+  "repository": "git+https://github.com/mopi1402/tayomi-deterministic-gates.git",
+  "keywords": [
+    "coding-agents",
+    "quality-gates",
+    "backpressure",
+    "claude-code",
+    "codex",
+    "hooks"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "packageManager": "pnpm@10.4.0",
+  "files": [
+    ".claude-plugin",
+    "plugin.json",
+    "catalog",
+    "hooks",
+    "src",
+    "!src/**/*.test.ts"
+  ],
+  "scripts": {
+    "catalog": "node src/catalog/catalog.ts",
+    "check": "tsc && prettier --check . && node --test \"src/**/*.test.ts\"",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "integration": "node --test \"integration/*.test.ts\""
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "jscpd": "5.4.2",
+    "knip": "6.44.1",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3"
+  }
+}

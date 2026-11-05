@@ -1,0 +1,16 @@
+{
+  "name": "typescript-sample",
+  "private": true,
+  "description": "A TypeScript project the integration tests run the catalog gates on. It never depends on the engine.",
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "eslint": "10.14.0",
+    "jscpd": "5.4.2",
+    "knip": "6.44.1",
+    "prettier": "3.9.10",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.1",
+    "vitest": "5.1.0"
+  }
+}

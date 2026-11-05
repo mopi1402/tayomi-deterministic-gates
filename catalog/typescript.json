@@ -1,0 +1,117 @@
+{
+  "title": "TypeScript",
+  "description": "Gates for a TypeScript or JavaScript repo. Each tool comes from the repo's node_modules, so its version is the one the lockfile pins.",
+  "gates": [
+    {
+      "description": "Lints the changed files with ESLint, warnings included: a warning nobody is sent back for is never fixed.",
+      "requires": [
+        {
+          "tool": "eslint",
+          "install": "npm install --save-dev eslint"
+        }
+      ],
+      "gate": {
+        "name": "lint",
+        "severity": "error",
+        "files": "\\.(ts|tsx|js|mjs)$",
+        "run": ["eslint", "--max-warnings", "0", "--no-warn-ignored", "{files}"]
+      }
+    },
+    {
+      "description": "Type-checks the project with tsc, since a change in one file can break the types of another. Incremental: tsc keeps what it learnt under node_modules/.cache and re-checks only what the changed files reach.",
+      "requires": [
+        {
+          "tool": "typescript",
+          "install": "npm install --save-dev typescript"
+        }
+      ],
+      "gate": {
+        "name": "typecheck",
+        "severity": "error",
+        "files": "(\\.(ts|tsx)|^tsconfig\\.json)$",
+        "run": [
+          "typescript",
+          "--pretty",
+          "false",
+          "--incremental",
+          "--tsBuildInfoFile",
+          "node_modules/.cache/gates/tsbuildinfo"
+        ]
+      }
+    },
+    {
+      "description": "Checks that Prettier leaves the changed files as they are.",
+      "requires": [
+        {
+          "tool": "prettier",
+          "install": "npm install --save-dev prettier"
+        }
+      ],
+      "gate": {
+        "name": "format",
+        "severity": "error",
+        "files": "\\.(ts|tsx|js|mjs|json|md|css|ya?ml)$",
+        "run": ["prettier", "--check", "--log-level", "warn", "--no-error-on-unmatched-pattern", "{files}"]
+      }
+    },
+    {
+      "description": "Runs only the Vitest tests that import a changed file, directly or not.",
+      "requires": [
+        {
+          "tool": "vitest",
+          "install": "npm install --save-dev vitest"
+        }
+      ],
+      "gate": {
+        "name": "related-tests",
+        "severity": "error",
+        "files": "\\.(ts|tsx)$",
+        "run": ["vitest", "related", "--run", "--passWithNoTests", "--reporter=minimal", "{files}"],
+        "timeoutSeconds": 60
+      }
+    },
+    {
+      "description": "Runs only the node:test tests that import a changed file, directly or not, for a repo that tests with Node itself. Node has no related mode: the helper follows the imports. It finds the tests by Node's own naming; --tests <regex> narrows it.",
+      "requires": [],
+      "gate": {
+        "name": "related-node-tests",
+        "severity": "error",
+        "files": "\\.(ts|mts|cts|js|mjs|cjs)$",
+        "run": ["{engine}/src/helpers/related-tests.ts", "{files}"],
+        "timeoutSeconds": 60
+      }
+    },
+    {
+      "description": "Fails on the copy-pasted blocks the turn added, never on the ones already there. An agent that misses an existing helper writes a second one, and the two drift apart.",
+      "requires": [
+        {
+          "tool": "jscpd",
+          "install": "npm install --save-dev jscpd"
+        }
+      ],
+      "gate": {
+        "name": "no-new-clones",
+        "severity": "error",
+        "files": "\\.(ts|tsx)$",
+        "run": ["{engine}/src/helpers/new-clones.ts", "{turn}"]
+      }
+    },
+    {
+      "description": "Fails on the unused files, exports and dependencies the turn added, never on the ones already there, so it works on a repo that already has some.",
+      "requires": [
+        {
+          "tool": "knip",
+          "install": "npm install --save-dev knip"
+        }
+      ],
+      "gate": {
+        "name": "no-new-dead-code",
+        "severity": "error",
+        "files": "(\\.(ts|tsx)|^package\\.json|^knip\\.json)$",
+        "run": ["knip", "--reporter", "compact", "--no-exit-code", "--no-progress"],
+        "compare": "turn-start",
+        "ignoreLines": "\\(\\d+\\)$"
+      }
+    }
+  ]
+}
