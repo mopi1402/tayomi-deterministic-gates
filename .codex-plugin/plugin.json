@@ -8,5 +8,13 @@
   },
   "repository": "https://github.com/mopi1402/tayomi-deterministic-gates",
   "license": "MIT",
-  "keywords": ["coding-agents", "quality-gates", "backpressure", "hooks"]
+  "keywords": ["coding-agents", "quality-gates", "backpressure", "hooks"],
+  "interface": {
+    "displayName": "Deterministic Gates",
+    "shortDescription": "Runs the gates of the repo on what each turn changed, and sends the agent back until they pass.",
+    "longDescription": "Deterministic backpressure for coding agents. At the end of each turn, the gates of the repo run on the files the turn changed: a linter, a type checker, the related tests, a dead-code finder. A gate is a tool, never a model. If a gate fails, the agent is sent back once with the report. The gates live in .gates.json; the catalog of the plugin lists the ones worth copying.",
+    "developerName": "Pierre Moati",
+    "category": "Developer Tools",
+    "websiteURL": "https://github.com/mopi1402/tayomi-deterministic-gates"
+  }
 }
