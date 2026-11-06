@@ -23,7 +23,7 @@
   "packageManager": "pnpm@10.4.0",
   "files": [
     ".claude-plugin",
-    "plugin.json",
+    ".codex-plugin",
     "catalog",
     "hooks",
     "src",

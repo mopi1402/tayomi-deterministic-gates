@@ -13,7 +13,12 @@ function versionOf(file: string): unknown {
 
 describe("the manifests", () => {
   test("agree on the version: the package, the plugin for each agent, and the marketplace", () => {
-    const files = ["package.json", "plugin.json", ".claude-plugin/plugin.json", ".claude-plugin/marketplace.json"];
+    const files = [
+      "package.json",
+      ".claude-plugin/plugin.json",
+      ".codex-plugin/plugin.json",
+      ".claude-plugin/marketplace.json",
+    ];
     const versions = new Set(files.map(versionOf));
     assert.equal(versions.size, 1, `versions: ${files.map((file) => `${file} ${String(versionOf(file))}`).join(", ")}`);
   });

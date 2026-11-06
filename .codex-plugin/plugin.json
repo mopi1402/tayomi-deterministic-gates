@@ -1,5 +1,4 @@
 {
-  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
   "name": "deterministic-gates",
   "version": "0.1.0",
   "description": "Deterministic backpressure for coding agents: gates that run on what each turn changed and send the agent back until they pass.",

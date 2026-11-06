@@ -30,7 +30,12 @@ To enable it for one repo only, declare the marketplace and the plugin in that r
 
 ### Codex
 
-Codex installs the plugin, but does not run the hooks a plugin bundles yet ([openai/codex#16430](https://github.com/openai/codex/issues/16430)). Until it does, clone this repo and declare in `~/.codex/hooks.json` the two hooks `hooks/hooks.json` declares, with the path of the clone in place of `${CLAUDE_PLUGIN_ROOT}`. Codex runs no hook you have not reviewed: trust them with `/hooks`.
+```
+codex plugin marketplace add mopi1402/tayomi-deterministic-gates
+codex plugin add deterministic-gates@tayomi-deterministic-gates
+```
+
+Codex runs no hook you have not reviewed: in a session, open `/hooks` and trust the two hooks of the plugin. A plugin update that changes a script asks for a new review.
 
 ## Configure the gates
 
