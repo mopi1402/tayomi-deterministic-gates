@@ -106,6 +106,14 @@ describe("check, on any language", () => {
     assert.match(outcome.output, /^git version/);
   });
 
+  test("strips the colours a tool prints despite NO_COLOR, and the root from the paths it names", async () => {
+    const coloured = `\x1b[31m${join(root, "src", "a.ts")}\x1b[0m: bad\n`;
+    tool(`process.stdout.write(${JSON.stringify(coloured)}); process.exit(1)`);
+    const outcome = await check(root, { ...LINT, run: ["tool.mjs"] }, ["a.ts"], "abc", undefined);
+    assert.equal(outcome.ok, false);
+    assert.equal(outcome.output, `${join("src", "a.ts")}: bad`);
+  });
+
   test("fails when its command is not installed, instead of breaking the whole check", async () => {
     const missing = { ...LINT, run: ["no-such-tool", "{files}"] };
     const outcome = await check(root, missing, ["a.ts"], "abc", undefined);
