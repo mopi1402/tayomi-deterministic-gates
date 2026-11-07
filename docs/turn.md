@@ -1,22 +1,46 @@
 # How a turn is checked, in detail
 
-The README gives the four steps. This page holds what the engine does around them, for whoever needs to know.
+The README gives the four steps. This page draws them, with what the engine does around them.
 
-## The turn start
+## The turn
 
-When a prompt arrives, the engine records the working tree as a commit that no branch points to, untracked files included and ignored files left out. The commit lives among the loose objects of `.git` until git prunes it, like any object nothing points to. If git pruned it before the stop, the turn is checked from the last commit instead, with the gates and the reports it started with, and the summary says so.
+```mermaid
+flowchart TD
+    prompt[A prompt arrives] --> start[The working tree is recorded as a commit no branch points to]
+    start --> known{The start report of each compared gate is known for this tree?}
+    known -- no --> baseline[It runs on the whole project]
+    known -- yes --> work
+    baseline --> work[The agent works]
+    work --> stop[The agent stops]
+    stop --> changed[The tree is recorded again: the files the turn changed]
+    changed --> gates[Each gate with a matching file runs, all in parallel, with the gates as the turn started]
+    gates -- all green --> done[The turn ends]
+    gates -- a gate fails, first stop --> back[The agent is sent back once, with the reports]
+    back --> work
+    gates -- a gate fails, second stop --> owner[Only you are told, so a gate the agent cannot satisfy never loops]
+```
 
-Each compared gate then runs on the whole project, unless its report for that very tree is known from the last check of the repo: the first prompt of a session pays for it, the next ones mostly do not.
+The start commit lives among the loose objects of `.git` until git prunes it, like any object nothing points to. It changes neither the index, nor the files, nor any branch. The first prompt of a session pays for the start reports; the next ones mostly do not, since the last check of the repo already holds them.
 
-A turn you interrupt never reaches its check. The next turn of the repo starts where it did, so its check also covers what the interrupted one changed.
+The retry is told by the flag the agent sends with its stop. When another Stop hook of yours sends the agent back first, the engine takes its next check for the retry and sends nobody back.
 
-A turn with no recorded start, as the first stop after the hooks are installed, is checked from the last commit, in the repo of the folder the agent stops in, with the gates of now. A compared gate then has no report to compare with and counts only its exit code: the summary says so.
+## Where the start comes from
+
+```mermaid
+flowchart TD
+    stop{At the stop, the start of the turn is} -- recorded, and git still has it --> commit[That commit, with the gates and the start reports of then]
+    stop -- recorded, then pruned by git --> pruned[The last commit, with the gates and the start reports of then: the summary says so]
+    stop -- not recorded, as the first stop after the hooks are installed --> none[The last commit of the repo the agent stops in, with the gates of now: a compared gate counts only its exit code, and the summary says so]
+    stop -- the start of a turn you interrupted --> kept[That start, so the check also covers what the interrupted turn changed]
+```
+
+The check runs in the repo the turn started in, whatever folder the agent stops in.
 
 ## The files of the turn
 
 A deleted file counts as changed, so a gate that reads the whole project runs on it. It is never named, though: a gate given `{files}` looks at the files left, and is skipped when none is left.
 
-`{files}` is an argument of its own and expands to the changed files the gate looks at. `{turn}` expands, wherever it stands in an argument, to the commit that holds the tree as the turn started. `{engine}/` only ever starts the first word of `run`.
+`{files}` is an argument of its own and expands to the changed files the gate looks at. `{turn}` expands, wherever it stands in an argument, to the start commit. `{engine}/` only ever starts the first word of `run`.
 
 A gate runs from the root of the repo, with colour turned off. Its report is cut to the first and last lines past 4000 characters, with the root path left out.
 
@@ -26,17 +50,13 @@ A compared gate fails on the lines of output the turn added: the lines its start
 
 The command exits with 0 when it finds problems, as `knip --no-exit-code` or `gofmt -l` do. Any other exit code fails the gate, even when it printed the same thing as the turn started.
 
-## The retry
-
-The agent is sent back once. The engine tells a retry by the flag the agent sends with its stop, so when another Stop hook of yours sends the agent back first, the engine takes its next check for the retry and sends nobody back.
-
 ## What the engine keeps
 
-The engine keeps what it knows in the temporary folder of the system: the turn of each session, and the last reports of each repo. It writes nothing in the repo, and the folder is the system's to clean.
+The turn of each session and the last reports of each repo, in the temporary folder of the system. It writes nothing in the repo, and the folder is the system's to clean.
 
 ## What the lock covers
 
-A turn is checked with the gates as it started: an agent that edits `.gates.json` or `.gates.local.json` mid-turn changes the next turn, never its own, and the summary says so. This covers the two gates files alone. The configuration of a tool, such as `tsconfig.json` or `eslint.config.js`, is read as it is when the gate runs, and only the conduct the agent is told keeps it from weakening one. The `no-new-suppressions` gate of the catalog refuses the other way out, the rule silenced in the code.
+The two gates files alone: an agent that edits `.gates.json` or `.gates.local.json` mid-turn changes the next turn, never its own, and the summary says so. The configuration of a tool, such as `tsconfig.json` or `eslint.config.js`, is read as it is when the gate runs, and only the conduct the agent is told keeps it from weakening one. The `no-new-suppressions` gate of the catalog refuses the other way out, the rule silenced in the code.
 
 ## The whole check
 
