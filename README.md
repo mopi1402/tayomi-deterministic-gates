@@ -87,12 +87,12 @@ Each developer can add `.gates.local.json` next to `.gates.json`, and add it to 
 
 ## How a turn is checked
 
-1. When a prompt arrives, the engine records the working tree as a commit that no branch points to. It changes neither the index, nor the files, nor any branch.
-2. When the agent stops, the engine records the tree again and lists the files the turn changed.
-3. Each gate with a matching file runs, all of them in parallel, with the gates as the turn started: an agent that edits `.gates.json` mid-turn changes the next turn, never its own.
-4. If a gate fails, the agent is sent back once with the reports, told to fix the code and never the check, and to hand back and say so if a report is wrong. If it stops again with a gate still failing, only you are told, so a gate the agent cannot satisfy never loops.
+1. When a prompt arrives, the engine records the working tree as a commit that no branch points to, without touching the index, the files or any branch.
+2. When the agent stops, it records the tree again and lists the files the turn changed.
+3. Each gate with a matching file runs, all of them in parallel, with the gates as the turn started.
+4. If a gate fails, the agent is sent back once with the reports, told to fix the code and never the check, and to hand back if a report contradicts what it was asked. If it stops again with a gate still failing, only you are told: no loop.
 
-A turn you interrupt is checked with the next turn of its repo, in the repo it started in, whatever folder the agent stops in. [docs/turn.md](docs/turn.md) has the rest: what a turn with no recorded start gets, how a compared gate reads its report, what the engine keeps between turns, and what the lock covers.
+[docs/turn.md](docs/turn.md) draws the rest: where the start comes from, how a compared gate reads its report, what the engine keeps between turns, and what the lock covers.
 
 To check the whole repo, as before adopting the gates or in a pre-push hook:
 
@@ -100,7 +100,7 @@ To check the whole repo, as before adopting the gates or in a pre-push hook:
 node src/cli.ts check
 ```
 
-Every gate runs on every file that matches, as if one turn had written it all, and the command exits with 1 when a gate fails.
+Every gate runs on every file that matches, and the command exits with 1 when a gate fails.
 
 ## Develop
 

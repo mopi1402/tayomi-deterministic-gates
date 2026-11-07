@@ -20,9 +20,7 @@ flowchart TD
     gates -- a gate fails, second stop --> owner[Only you are told, so a gate the agent cannot satisfy never loops]
 ```
 
-The start commit lives among the loose objects of `.git` until git prunes it, like any object nothing points to. It changes neither the index, nor the files, nor any branch. The first prompt of a session pays for the start reports; the next ones mostly do not, since the last check of the repo already holds them.
-
-The retry is told by the flag the agent sends with its stop. When another Stop hook of yours sends the agent back first, the engine takes its next check for the retry and sends nobody back.
+The start commit lives among the loose objects of `.git` until git prunes it, like any object nothing points to. The retry is told by the flag the agent sends with its stop: when another Stop hook of yours sends the agent back first, the engine takes its next check for the retry and sends nobody back.
 
 ## Where the start comes from
 
@@ -38,9 +36,7 @@ The check runs in the repo the turn started in, whatever folder the agent stops 
 
 ## The files of the turn
 
-A deleted file counts as changed, so a gate that reads the whole project runs on it. It is never named, though: a gate given `{files}` looks at the files left, and is skipped when none is left.
-
-`{files}` is an argument of its own and expands to the changed files the gate looks at. `{turn}` expands, wherever it stands in an argument, to the start commit. `{engine}/` only ever starts the first word of `run`.
+A deleted file counts as changed, so a gate that reads the whole project runs on it. It is never named, though: a gate given `{files}` looks at the files left, and is skipped when none is left. `{files}` is an argument of its own, `{turn}` can stand anywhere in one, and `{engine}/` only ever starts the first word of `run`.
 
 A gate runs from the root of the repo, with colour turned off. Its report is cut to the first and last lines past 4000 characters, with the root path left out.
 
@@ -61,5 +57,3 @@ The two gates files alone: an agent that edits `.gates.json` or `.gates.local.js
 ## The whole check
 
 `node src/cli.ts check` runs every gate on every file of the repo that matches, committed or not, as if one turn had written it all: a compared gate counts every line of its report. The summary and the failed reports print. The command exits with 1 when a gate fails, and with 2 when it cannot run: outside git, without a gates file, or with one it cannot read.
-
-It shows the state of a repo before its gates are adopted, gives an agent asked to clean a repo up the same reports as the hook, and makes a pre-push hook: the turn pays for what it changed, the push pays for the whole.
