@@ -1,3 +1,5 @@
+<p align="center"> <img src="docs/images/tayomi-deterministic-gates.png" alt="deterministic-gates" width="220"/> </p>
+
 # deterministic-gates
 
 Deterministic backpressure for coding agents. At the end of each turn, the gates run on what the agent changed. A gate is a tool, never a model: a linter, a type checker, the related tests, a dead-code finder. If a gate fails, the agent is sent back once with the report, while the context is fresh.
