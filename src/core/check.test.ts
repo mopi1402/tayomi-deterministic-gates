@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import { checkAll, checkTurn, startTurn } from "./check.ts";
 import { gatesOf, readGatesFiles } from "./config.ts";
 import { cachedReports } from "./report-cache.ts";
-import { snapshot, treeOf } from "./snapshot.ts";
+import { snapshot } from "./snapshot.ts";
 import { readTurn, writeTurn } from "./turn-state.ts";
 import { commitAll, tempRepo, writeGates } from "../testing.ts";
 
@@ -17,7 +17,7 @@ const gates = (...list: object[]) => writeGates(repo, ...list);
 
 function cachedNow(): string | undefined {
   const [gate] = gatesOf(readGatesFiles(repo));
-  return gate && cachedReports(repo, treeOf(repo, snapshot(repo)))(gate);
+  return gate && cachedReports(repo, snapshot(repo).tree)(gate);
 }
 
 beforeEach(() => {

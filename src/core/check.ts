@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { changedGatesFiles, type Gate, gatesOf, isCompared, readGatesFiles } from "./config.ts";
 import { cachedReports, cacheReports } from "./report-cache.ts";
 import { check, filesOf, givenFiles, type Outcome, wholeProject } from "./run.ts";
-import { changedSince, emptyCommit, hasCommit, lastCommit, snapshot, treeOf, workingTree } from "./snapshot.ts";
+import { changedSince, emptyCommit, hasCommit, lastCommit, snapshot, workingTree } from "./snapshot.ts";
 import { readTurn, type TurnState, writeTurn } from "./turn-state.ts";
 
 export interface CheckedTurn {
@@ -35,8 +35,7 @@ export async function startTurn(session: string, root: string): Promise<void> {
     writeTurn(session, root, interrupted);
     return;
   }
-  const start = snapshot(root);
-  const tree = treeOf(root, start);
+  const { commit: start, tree } = snapshot(root);
   const cached = cachedReports(root, tree);
   const baselines = await Promise.all(
     compared.map(async (gate) => {

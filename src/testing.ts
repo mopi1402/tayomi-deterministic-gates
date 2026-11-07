@@ -16,7 +16,7 @@ export function git(repo: string, args: string[]): string {
 /** A fresh git repo in a temporary folder, for the test to remove. */
 export function tempRepo(): string {
   const repo = mkdtempSync(join(tmpdir(), "gates-test-"));
-  git(repo, ["init", "--quiet"]);
+  git(repo, ["init", "--quiet", "--template="]);
   return repo;
 }
 

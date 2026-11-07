@@ -63,9 +63,10 @@ export function workingTree(root: string): string {
   }
 }
 
-/** Records the working tree as a commit that no branch points to, for the tools given the turn. */
-export function snapshot(root: string): string {
-  return commitOf(root, workingTree(root), "gates turn");
+/** Records the working tree as a commit that no branch points to, for the tools given the turn, with its tree. */
+export function snapshot(root: string): { commit: string; tree: string } {
+  const tree = workingTree(root);
+  return { commit: commitOf(root, tree, "gates turn"), tree };
 }
 
 /**
@@ -92,10 +93,6 @@ export function hasCommit(root: string, commit: string): boolean {
   } catch {
     return false;
   }
-}
-
-export function treeOf(root: string, commit: string): string {
-  return git(root, ["rev-parse", `${commit}^{tree}`]);
 }
 
 /** The files that differ between two commits or trees, the deleted ones included. */

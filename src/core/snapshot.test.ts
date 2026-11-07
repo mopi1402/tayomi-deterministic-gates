@@ -3,7 +3,7 @@ import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { commitAll, git, tempRepo } from "../testing.ts";
-import { changedSince, hasCommit, lastCommit, snapshot, treeOf } from "./snapshot.ts";
+import { changedSince, hasCommit, lastCommit, snapshot } from "./snapshot.ts";
 
 let repo = "";
 const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -25,7 +25,7 @@ afterEach(() => {
 
 describe("a turn", () => {
   test("holds what changed after its start, untracked and deleted files included, ignored ones left out", () => {
-    const start = snapshot(repo);
+    const start = snapshot(repo).commit;
     writeFileSync(join(repo, "edited.ts"), "3");
     writeFileSync(join(repo, "new.ts"), "added in the turn");
     writeFileSync(join(repo, "ignored.ts"), "ignored");
@@ -34,7 +34,7 @@ describe("a turn", () => {
   });
 
   test("names a changed file as it is, accents and spaces included", () => {
-    const start = snapshot(repo);
+    const start = snapshot(repo).commit;
     writeFileSync(join(repo, "café crème.ts"), "added in the turn");
     assert.deepEqual(changedSince(repo, start), ["café crème.ts"]);
   });
@@ -47,27 +47,26 @@ describe("a turn", () => {
     git(repo, ["add", "kept.ts"]);
     writeFileSync(join(repo, "kept.ts"), "b");
     sleep(1100);
-    assert.equal(git(repo, ["show", `${snapshot(repo)}:kept.ts`]), "b");
+    assert.equal(git(repo, ["show", `${snapshot(repo).commit}:kept.ts`]), "b");
   });
 
   test("sees a staged change and an unstaged change on top of it", () => {
     writeFileSync(join(repo, "kept.ts"), "staged");
     git(repo, ["add", "kept.ts"]);
-    const start = snapshot(repo);
+    const start = snapshot(repo).commit;
     writeFileSync(join(repo, "kept.ts"), "edited after staging");
     assert.deepEqual(changedSince(repo, start), ["kept.ts"]);
   });
 
   test("holds the same tree when the files are the same, and another one when they change", () => {
-    const first = snapshot(repo);
-    const second = snapshot(repo);
-    assert.equal(treeOf(repo, second), treeOf(repo, first));
+    const first = snapshot(repo).tree;
+    assert.equal(snapshot(repo).tree, first);
     writeFileSync(join(repo, "edited.ts"), "3");
-    assert.notEqual(treeOf(repo, snapshot(repo)), treeOf(repo, first));
+    assert.notEqual(snapshot(repo).tree, first);
   });
 
   test("tells a start git still has from one it pruned", () => {
-    assert.equal(hasCommit(repo, snapshot(repo)), true);
+    assert.equal(hasCommit(repo, snapshot(repo).commit), true);
     assert.equal(hasCommit(repo, "0123456789abcdef0123456789abcdef01234567"), false);
   });
 

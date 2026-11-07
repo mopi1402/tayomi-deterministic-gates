@@ -9,7 +9,7 @@ import { git, outcome, ran, tempRepo } from "../testing.ts";
 import { handleHook, parseHookInput, stopOutput } from "./hook.ts";
 
 const FAILING_GATE = JSON.stringify({
-  gates: [{ name: "fail", severity: "error", files: "\\.ts$", run: ["fail.mjs"] }],
+  gates: [{ name: "fail", severity: "error", files: "\\.ts$", run: ["false"] }],
 });
 
 /**
