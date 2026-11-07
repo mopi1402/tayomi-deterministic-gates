@@ -44,10 +44,11 @@ function commitOf(root: string, tree: string, message: string): string {
 }
 
 /**
- * The tree of the working tree, untracked files included and ignored files left out. It changes neither the index
- * nor the files.
+ * The tree of the working tree, untracked files included and ignored files left out, from the files given or every
+ * file of the repo. It changes neither the index nor the files. A file gone since it was listed is left out: another
+ * hook may write in the tree as the agent stops, and `git add` dies on a file it listed and cannot stat.
  */
-export function workingTree(root: string): string {
+export function workingTree(root: string, files = listFiles(root)): string {
   const dir = mkdtempSync(join(tmpdir(), "gates-index-"));
   const env = { ...process.env, GIT_INDEX_FILE: join(dir, "index") };
   try {
@@ -56,7 +57,10 @@ export function workingTree(root: string): string {
     // size and date only when the index is older than the file: a newer date would hide a same-size rewrite.
     const realIndex = resolve(root, git(root, ["rev-parse", "--git-path", "index"]));
     if (existsSync(realIndex)) cpSync(realIndex, env.GIT_INDEX_FILE, { preserveTimestamps: true });
-    git(root, ["add", "--all"], { env });
+    git(root, ["update-index", "--add", "--remove", "-z", "--stdin"], {
+      env,
+      input: files.map((f) => `${f}\0`).join(""),
+    });
     return git(root, ["write-tree"], { env });
   } finally {
     rmSync(dir, { recursive: true, force: true });

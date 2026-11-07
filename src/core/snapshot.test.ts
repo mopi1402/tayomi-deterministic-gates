@@ -3,7 +3,7 @@ import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { commitAll, git, tempRepo } from "../testing.ts";
-import { changedSince, hasCommit, lastCommit, snapshot } from "./snapshot.ts";
+import { changedSince, hasCommit, lastCommit, listFiles, snapshot, workingTree } from "./snapshot.ts";
 
 let repo = "";
 const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -82,6 +82,10 @@ describe("a turn", () => {
     } finally {
       rmSync(empty, { recursive: true, force: true });
     }
+  });
+
+  test("leaves out a file gone since it was listed, as another hook may write in the tree as the agent stops", () => {
+    assert.equal(workingTree(repo, [...listFiles(repo), "gone.ts"]), workingTree(repo));
   });
 
   test("leaves the index, the branch and the status untouched", () => {
