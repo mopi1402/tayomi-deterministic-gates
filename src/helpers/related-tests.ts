@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { listFiles } from "../core/snapshot.ts";
 
 // The node:test tests that a change can break: those that import a changed file, directly or through other files.
@@ -73,7 +74,12 @@ function main(args: string[]): void {
   if (!related.length) return;
   // Run as a test runner of its own, even from inside another node --test, as the tests of this engine do.
   const { NODE_TEST_CONTEXT: _nested, ...env } = process.env;
-  const run = spawnSync(process.execPath, ["--test", ...related], { stdio: "inherit", env });
+  const reporter = pathToFileURL(join(import.meta.dirname, "test-reporter.ts")).href;
+  const run = spawnSync(
+    process.execPath,
+    ["--test", `--test-reporter=${reporter}`, "--test-reporter-destination=stdout", ...related],
+    { stdio: "inherit", env },
+  );
   process.exitCode = run.status ?? 1;
 }
 
