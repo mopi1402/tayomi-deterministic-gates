@@ -84,8 +84,11 @@ describe("a turn", () => {
     }
   });
 
-  test("leaves out a file gone since it was listed, as another hook may write in the tree as the agent stops", () => {
-    assert.equal(workingTree(repo, [...listFiles(repo), "gone.ts"]), workingTree(repo));
+  test("records the files listed, so a file gone since the listing is left out without an error", () => {
+    const listed = listFiles(repo).filter((file) => file !== "before.ts");
+    const tree = workingTree(repo, [...listed, "gone.ts"]);
+    rmSync(join(repo, "before.ts"));
+    assert.equal(tree, workingTree(repo));
   });
 
   test("leaves the index, the branch and the status untouched", () => {

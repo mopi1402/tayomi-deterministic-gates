@@ -59,7 +59,7 @@ export function workingTree(root: string, files = listFiles(root)): string {
     if (existsSync(realIndex)) cpSync(realIndex, env.GIT_INDEX_FILE, { preserveTimestamps: true });
     git(root, ["update-index", "--add", "--remove", "-z", "--stdin"], {
       env,
-      input: files.map((f) => `${f}\0`).join(""),
+      input: files.map((file) => `${file}\0`).join(""),
     });
     return git(root, ["write-tree"], { env });
   } finally {
