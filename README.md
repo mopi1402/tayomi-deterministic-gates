@@ -8,7 +8,7 @@ CI stays the authority for slow and full checks. The gates catch what the agent 
 
 ## Install
 
-The engine works with any agent that speaks the hook protocol Claude Code and Codex share: one hook runs as a prompt arrives, another as the agent stops. It needs Node 24.2 or later, has no runtime dependency, and does nothing outside git or in a repo with no gates file.
+The engine works with any agent that speaks the hook protocol Claude Code and Codex share: one hook runs as a session starts, one as a prompt arrives, another as the agent stops. It needs Node 24.2 or later, has no runtime dependency, and does nothing outside git or in a repo with no gates file.
 
 ### Claude Code
 
@@ -37,7 +37,7 @@ codex plugin marketplace add mopi1402/tayomi-deterministic-gates
 codex plugin add deterministic-gates@tayomi-deterministic-gates
 ```
 
-Codex runs no hook you have not reviewed: in a session, open `/hooks` and trust the two hooks of the plugin. A plugin update that changes a script asks for a new review.
+Codex runs no hook you have not reviewed: in a session, open `/hooks` and trust the three hooks of the plugin. A plugin update that changes a script asks for a new review.
 
 ## Configure the gates
 
@@ -64,7 +64,7 @@ The gates of a repo live in `.gates.json` at its root, committed. Each one names
 | `run`            | The command, then its arguments. See below.                                                                                                                                             |
 | `compare`        | `turn-start`: the command runs on the whole project as the turn starts, and only the lines of output the turn added fail the gate. For a tool that exits with 0 when it finds problems. |
 | `ignoreLines`    | A regular expression for lines of output that never count as new, such as a header with a total.                                                                                        |
-| `timeoutSeconds` | 30 by default, 60 at most. A slower check belongs in CI.                                                                                                                                |
+| `timeoutSeconds` | Less time for this gate than the check has, never more.                                                                                                                                 |
 
 The first word of `run` is looked up in this order, so a gate can run Node, Python, Go or any other program:
 
@@ -73,7 +73,11 @@ The first word of `run` is looked up in this order, so a gate can run Node, Pyth
 3. a package of the repo's `node_modules`, run through its command, such as `eslint`;
 4. a program: by its path in the repo, such as `.venv/bin/ruff`, or by its name on the `PATH`, such as `go`, `gofmt` or `ruff`.
 
-A tool the repo pins beats one on the `PATH`, so write the pinned form when there is one, such as `["uv", "run", "ruff", ...]`. A gate whose program is not installed fails with a message that says so, and the other gates still report.
+A tool the repo pins beats one on the `PATH`, so write the pinned form when there is one, such as `["uv", "run", "ruff", ...]`. A gate whose program is not installed never runs, and the other gates still do. As a prompt arrives, the agent is asked to install the tool and you are told which gates are off. It is asked once, and again only when the list of missing tools changes or the session starts again.
+
+A gate whose entry is wrong, such as with an unknown field, is left out and named in the summary, and the other gates still run.
+
+Next to `gates`, `maxTimeoutSeconds` is the time the gates of a check have, all together: 45 seconds by default. They start at once, and a gate still running then is stopped. It shows out of time, neither green nor red, and never sends the agent back, since nobody knows what it would have said. A slower check belongs in CI.
 
 In the arguments, `{files}` expands to the changed files the gate looks at, and `{turn}` to the commit that holds the tree as the turn started.
 
@@ -83,7 +87,7 @@ In the arguments, `{files}` expands to the changed files the gate looks at, and 
 
 ## Override the gates for yourself
 
-Each developer can add `.gates.local.json` next to `.gates.json`, and add it to `.gitignore`. A local entry with the name of a shared gate changes only the fields it gives, such as `{ "name": "typecheck", "timeoutSeconds": 45 }`. Any other local entry adds a gate.
+Each developer can add `.gates.local.json` next to `.gates.json`, and add it to `.gitignore`. A local entry with the name of a shared gate changes only the fields it gives, such as `{ "name": "typecheck", "timeoutSeconds": 20 }`. Any other local entry adds a gate.
 
 ## How a turn is checked
 

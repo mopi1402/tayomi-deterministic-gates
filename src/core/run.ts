@@ -1,5 +1,6 @@
 import { execFile, type ExecFileException } from "node:child_process";
-import { resolve, sep } from "node:path";
+import { accessSync, constants } from "node:fs";
+import { delimiter, isAbsolute, join, resolve, sep } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { FILES, type Gate, isCompared, TURN } from "./config.ts";
 import { isRecord, messageOf, readJsonFile } from "./json.ts";
@@ -10,6 +11,13 @@ export interface Outcome {
   ms: number;
   output: string;
   report: string | undefined;
+  /** Stopped for lack of time: neither green nor red, since nobody knows what it would have said. */
+  timedOut?: boolean;
+}
+
+/** A gate that judged the turn and found a problem: the only kind that sends the agent back. */
+export function failed(outcome: Outcome): boolean {
+  return !outcome.ok && !outcome.timedOut;
 }
 
 const ENGINE = resolve(import.meta.dirname, "..", "..");
@@ -68,6 +76,35 @@ export function commandOf(root: string, name: string): Command {
   };
 }
 
+// A program by its path, or by its name on the PATH, that the system would execute.
+function executable(file: string): boolean {
+  const candidates = isAbsolute(file)
+    ? [file]
+    : (process.env.PATH ?? "").split(delimiter).map((dir) => join(dir, file));
+  return candidates.some((candidate) => {
+    try {
+      accessSync(candidate, constants.X_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
+ * Why the program of a gate cannot run on this machine, or nothing when it can: looked up as the gate would start it,
+ * without starting it. A command the engine cannot resolve is left to the run, which reports it.
+ */
+export function missingTool(root: string, gate: Gate): string | undefined {
+  let command: Command;
+  try {
+    command = commandOf(root, gate.run[0] ?? "");
+  } catch {
+    return undefined;
+  }
+  return command.missing && !executable(command.file) ? command.missing : undefined;
+}
+
 export function argumentsOf(gate: Gate, files: string[], turn: string): string[] {
   return gate.run.slice(1).flatMap((argument) => (argument === FILES ? files : [argument.replaceAll(TURN, turn)]));
 }
@@ -91,7 +128,14 @@ export function newLines(before: string, after: string, ignore?: string): string
     .filter((line) => line && !seen.has(line) && !ignored?.test(line));
 }
 
-async function execute(root: string, gate: Gate, args: string[]): Promise<{ ok: boolean; output: string; ms: number }> {
+interface Executed {
+  ok: boolean;
+  output: string;
+  ms: number;
+  timedOut: boolean;
+}
+
+async function execute(root: string, gate: Gate, args: string[]): Promise<Executed> {
   const started = performance.now();
   const [name = ""] = gate.run;
   // A gate that cannot start fails alone: the other gates of the turn still report.
@@ -99,7 +143,7 @@ async function execute(root: string, gate: Gate, args: string[]): Promise<{ ok: 
   try {
     command = commandOf(root, name);
   } catch (error) {
-    return { ok: false, output: messageOf(error), ms: performance.now() - started };
+    return { ok: false, output: messageOf(error), ms: performance.now() - started, timedOut: false };
   }
   return new Promise((resolve) => {
     execFile(
@@ -116,6 +160,7 @@ async function execute(root: string, gate: Gate, args: string[]): Promise<{ ok: 
           ok: !error,
           output: outputOf(root, gate, command, error, `${stdout}${stderr}`),
           ms: performance.now() - started,
+          timedOut: error?.killed === true && error.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
         });
       },
     );
@@ -132,7 +177,7 @@ function outputOf(
   if (error?.code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER")
     return `Printed more than ${MAX_OUTPUT_MB} MB: too much for the end of a turn. Make it quieter, or move it to CI.`;
   if (error?.killed === true)
-    return `Timed out after ${gate.timeoutSeconds} s: too slow for the end of a turn. Make it faster, or move it to CI.`;
+    return `Out of time after ${gate.timeoutSeconds} s, so not judged. Make it faster, or move it to CI.`;
   if (error?.code === "ENOENT") return command.missing;
   // Some tools colour despite NO_COLOR, and absolute paths only cost the agent tokens.
   const said = stripVTControlCharacters(printed).split(`${root}${sep}`).join("").trim();
@@ -147,7 +192,7 @@ export function wholeProject(root: string, gate: Gate): Promise<{ ok: boolean; o
 
 /**
  * Runs a gate on the turn. A compared gate fails on the lines of output the turn added, and on any exit code but 0:
- * the same crash or timeout at the start and at the end of a turn prints no new line.
+ * the same crash at the start and at the end of a turn prints no new line. A gate out of time is neither.
  */
 export async function check(
   root: string,
@@ -156,8 +201,9 @@ export async function check(
   turn: string,
   baseline: string | undefined,
 ): Promise<Outcome> {
-  const { ok, output, ms } = await execute(root, gate, argumentsOf(gate, files, turn));
+  const { ok, output, ms, timedOut } = await execute(root, gate, argumentsOf(gate, files, turn));
   const ran = { name: gate.name, ms, report: ok ? output : undefined };
+  if (timedOut) return { ...ran, ok, output, timedOut };
   if (!isCompared(gate) || !ok) return { ...ran, ok, output };
   if (baseline === undefined) return { ...ran, ok: true, output: "" };
   const added = newLines(baseline, output, gate.ignoreLines);

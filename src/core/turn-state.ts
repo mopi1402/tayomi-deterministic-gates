@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GatesFiles } from "./config.ts";
-import { isRecord, isStringRecord, readJsonFile } from "./json.ts";
+import { isRecord, isStringArray, isStringRecord, readJsonFile } from "./json.ts";
 
 /**
  * What a turn started from: the commit, the reports of its compared gates, and the gates files themselves, since a
@@ -26,11 +26,13 @@ function isGatesFiles(value: unknown): value is GatesFiles {
 
 /**
  * The turns of a session, one per repo, and the repo of the turn in progress. The agent may stop in another folder
- * than the one it started in, and a prompt from a folder with no gates starts a turn no check looks for.
+ * than the one it started in, and a prompt from a folder with no gates starts a turn no check looks for. With them,
+ * the tools each repo was missing when the agent was last told, so it is not asked again at every prompt.
  */
 interface SessionState {
   current?: string;
   turns: Record<string, TurnState>;
+  told?: Record<string, string[]>;
 }
 
 const EMPTY: SessionState = { turns: {} };
@@ -54,7 +56,8 @@ function isSessionState(value: unknown): value is SessionState {
     isRecord(value) &&
     (value.current === undefined || typeof value.current === "string") &&
     isRecord(value.turns) &&
-    Object.values(value.turns).every(isTurnState)
+    Object.values(value.turns).every(isTurnState) &&
+    (value.told === undefined || (isRecord(value.told) && Object.values(value.told).every(isStringArray)))
   );
 }
 
@@ -77,15 +80,33 @@ export function readTurn(session: string, root: string): TurnState | undefined {
  * progress is read again, by its retry.
  */
 export function writeTurn(session: string, root: string, turn: TurnState): void {
-  const { turns } = readSession(session);
+  const { turns, told } = readSession(session);
   const unchecked = Object.entries(turns).filter(([, kept]) => !kept.checked);
-  writeSession(session, { current: root, turns: { ...Object.fromEntries(unchecked), [root]: turn } });
+  writeSession(session, { told, current: root, turns: { ...Object.fromEntries(unchecked), [root]: turn } });
 }
 
 /** Ends the turn in progress without a check, as a prompt from a folder with no gates, or a failed start, does. */
 export function forgetTurn(session: string): void {
+  const { current, ...state } = readSession(session);
+  if (current !== undefined) writeSession(session, state);
+}
+
+/**
+ * Whether the agent is yet to be told that the repo misses these tools, in this session: once told, a list is not
+ * told again until it changes, since asking at every prompt someone who cannot install a tool only gets in the way.
+ */
+export function tellOnce(session: string, root: string, missing: string[]): boolean {
   const state = readSession(session);
-  if (state.current !== undefined) writeSession(session, { turns: state.turns });
+  const told = state.told?.[root] ?? [];
+  if (told.join("\n") === missing.join("\n")) return false;
+  writeSession(session, { ...state, told: { ...state.told, [root]: missing } });
+  return missing.length > 0;
+}
+
+/** Forgets what the agent was told of missing tools, so a session that starts again, or resumes, is told again. */
+export function forgetTold(session: string): void {
+  const { told, ...state } = readSession(session);
+  if (told !== undefined) writeSession(session, state);
 }
 
 /**

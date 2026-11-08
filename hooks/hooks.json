@@ -1,6 +1,17 @@
 {
   "description": "Run the deterministic gates on what each turn changed, and send the agent back until they pass",
   "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/cli.ts\" hook session-start",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
     "UserPromptSubmit": [
       {
         "hooks": [

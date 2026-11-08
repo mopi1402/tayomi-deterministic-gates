@@ -44,6 +44,7 @@ function session() {
       if (gates !== undefined) writeFileSync(join(path, ".gates.json"), gates);
       return path;
     },
+    start: (cwd: string, source: string) => handleHook("session-start", event("SessionStart", cwd, { source })),
     prompt: (cwd: string) => handleHook("turn-start", event("UserPromptSubmit", cwd, { prompt: "hi" })),
     stop: (cwd: string, retry = false) =>
       handleHook("check", event("Stop", cwd, { stop_hook_active: retry, last_assistant_message: "" })),
@@ -76,6 +77,17 @@ describe("stopOutput", () => {
     const output = stopOutput(ran([outcome("lint", false), outcome("dead", true)]), false);
     assert.equal(output.decision, "block");
     assert.match(output.reason ?? "", /## lint\nlint report/);
+  });
+
+  test("never sends the agent back for a gate out of time, and shows it apart from the green and the red", () => {
+    const late = { ...outcome("tests", false), timedOut: true };
+    const output = stopOutput(ran([outcome("lint", true), late]), false);
+    assert.equal(output.decision, undefined);
+    assert.match(stripVTControlCharacters(output.systemMessage), /1\/2 gates green in .* · 1 out of time/);
+    assert.match(stripVTControlCharacters(output.systemMessage), /⏱ tests/);
+    const both = stopOutput(ran([outcome("lint", false), late]), false);
+    assert.equal(both.decision, "block");
+    assert.doesNotMatch(both.reason ?? "", /## tests/);
   });
 
   test("never sends the agent back twice, so it never loops", () => {
@@ -189,6 +201,53 @@ describe("handleHook", () => {
       assert.equal(output?.decision, undefined);
       assert.match(output?.systemMessage ?? "", /could not run: \.gates\.json is not valid JSON/);
     }
+  });
+
+  describe("a gate whose tool this machine does not have", () => {
+    const gates = JSON.stringify({
+      gates: [
+        { name: "lint", severity: "error", files: "\\.ts$", run: ["no-such-tool", "{files}"] },
+        { name: "fail", severity: "error", files: "\\.ts$", run: ["false"] },
+      ],
+    });
+
+    test("asks the agent once to install the tool, and tells the owner which gate is off", async () => {
+      const repo = agent.repo(gates);
+      const asked = await agent.prompt(repo);
+      assert.match(asked?.hookSpecificOutput?.additionalContext ?? "", /- lint: no-such-tool is not installed/);
+      assert.match(asked?.hookSpecificOutput?.additionalContext ?? "", /stay off until they are installed/);
+      assert.match(stripVTControlCharacters(asked?.systemMessage ?? ""), /1 gate is off, a tool is missing/);
+      assert.equal(await agent.prompt(repo), undefined);
+    });
+
+    test("asks again once the session starts again or resumes, never after a compaction", async () => {
+      const repo = agent.repo(gates);
+      await agent.prompt(repo);
+      await agent.start(repo, "compact");
+      assert.equal(await agent.prompt(repo), undefined);
+      await agent.start(repo, "resume");
+      assert.ok((await agent.prompt(repo))?.hookSpecificOutput);
+    });
+
+    test("asks again when the list of missing tools changes", async () => {
+      const repo = agent.repo(gates);
+      await agent.prompt(repo);
+      const more = JSON.parse(gates) as { gates: object[] };
+      more.gates.push({ name: "types", severity: "error", files: "\\.ts$", run: ["no-other-tool"] });
+      writeFileSync(join(repo, ".gates.json"), JSON.stringify(more));
+      assert.match((await agent.prompt(repo))?.hookSpecificOutput?.additionalContext ?? "", /- types: no-other-tool/);
+    });
+
+    test("sends the agent back for the gates that ran, never for the one that could not", async () => {
+      const repo = agent.repo(gates);
+      await agent.prompt(repo);
+      writeFileSync(join(repo, "a.ts"), "1");
+      const stopped = await agent.stop(repo);
+      assert.equal(stopped?.decision, "block");
+      assert.match(stopped?.reason ?? "", /^## fail$/m);
+      assert.doesNotMatch(stopped?.reason ?? "", /^## lint$/m);
+      assert.match(stripVTControlCharacters(stopped?.systemMessage ?? ""), /lint not run: no-such-tool/);
+    });
   });
 
   test("tells the owner at the prompt that resumes an interrupted turn, when its gates cannot run any more", async () => {

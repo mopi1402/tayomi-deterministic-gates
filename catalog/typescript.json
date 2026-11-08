@@ -66,8 +66,7 @@
         "name": "related-tests",
         "severity": "error",
         "files": "\\.(ts|tsx)$",
-        "run": ["vitest", "related", "--run", "--passWithNoTests", "--reporter=minimal", "{files}"],
-        "timeoutSeconds": 60
+        "run": ["vitest", "related", "--run", "--passWithNoTests", "--reporter=minimal", "{files}"]
       }
     },
     {
@@ -77,8 +76,7 @@
         "name": "related-node-tests",
         "severity": "error",
         "files": "\\.(ts|mts|cts|js|mjs|cjs)$",
-        "run": ["{engine}/src/helpers/related-tests.ts", "{files}"],
-        "timeoutSeconds": 60
+        "run": ["{engine}/src/helpers/related-tests.ts", "{files}"]
       }
     },
     {

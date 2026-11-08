@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "deterministic-gates",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Deterministic backpressure for coding agents: gates that run on what each turn changed and send the agent back until they pass.",
   "author": {
     "name": "Pierre Moati",

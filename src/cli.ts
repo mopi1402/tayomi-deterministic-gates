@@ -3,6 +3,7 @@ import { checkAll } from "./core/check.ts";
 import { configuredRoot } from "./core/config.ts";
 import { messageOf } from "./core/json.ts";
 import { broken, reports, summary } from "./core/report.ts";
+import { failed } from "./core/run.ts";
 import { handleHook } from "./hook/hook.ts";
 
 function readStdin(): string {
@@ -28,7 +29,7 @@ if (oldNode !== undefined) {
     console.error(oldNode);
     process.exitCode = 2;
   }
-} else if (command === "hook" && (event === "turn-start" || event === "check")) {
+} else if (command === "hook" && (event === "session-start" || event === "turn-start" || event === "check")) {
   const output = await handleHook(event, readStdin());
   if (output) console.log(JSON.stringify(output));
 } else if (command === "check" && event === undefined) {
@@ -40,13 +41,13 @@ if (oldNode !== undefined) {
     try {
       const all = await checkAll(root);
       console.log([summary(all), ...reports(all.outcomes)].join("\n\n"));
-      if (all.outcomes.some((outcome) => !outcome.ok)) process.exitCode = 1;
+      if (all.outcomes.some(failed)) process.exitCode = 1;
     } catch (error) {
       console.error(`Could not run: ${messageOf(error)}`);
       process.exitCode = 2;
     }
   }
 } else {
-  console.error("Usage: node src/cli.ts hook <turn-start|check>, or node src/cli.ts check");
+  console.error("Usage: node src/cli.ts hook <session-start|turn-start|check>, or node src/cli.ts check");
   process.exitCode = 2;
 }

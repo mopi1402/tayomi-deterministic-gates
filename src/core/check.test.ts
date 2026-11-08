@@ -16,7 +16,7 @@ let session = "";
 const gates = (...list: object[]) => writeGates(repo, ...list);
 
 function cachedNow(): string | undefined {
-  const [gate] = gatesOf(readGatesFiles(repo));
+  const [gate] = gatesOf(readGatesFiles(repo)).gates;
   return gate && cachedReports(repo, snapshot(repo).tree)(gate);
 }
 
@@ -221,5 +221,53 @@ describe("a file the turn deleted", () => {
       ["whole"],
     );
     assert.deepEqual(turn.skipped, ["named"]);
+  });
+});
+
+describe("a gate whose tool this machine does not have", () => {
+  const missing = { name: "lint", severity: "error", files: "\\.ts$", run: ["no-such-tool", "{files}"] };
+  const present = { name: "true", severity: "error", files: "\\.ts$", run: ["true"] };
+
+  test("is named as the turn starts, with why", async () => {
+    gates(missing, present);
+    assert.deepEqual(await startTurn(session, repo), [
+      "lint: no-such-tool is not installed: it is neither a package of node_modules nor a program on the PATH.",
+    ]);
+  });
+
+  test("never runs nor fails the turn, and the check names it when the turn concerned it", async () => {
+    gates(missing, present);
+    await startTurn(session, repo);
+    writeFileSync(join(repo, "a.ts"), "1");
+    const turn = await checkTurn(session, repo);
+    assert.deepEqual(
+      turn.outcomes.map(({ name, ok }) => [name, ok]),
+      [["true", true]],
+    );
+    assert.match(turn.note ?? "", /^lint not run: no-such-tool is not installed/m);
+  });
+
+  test("is not named when the turn did not concern it", async () => {
+    gates(missing, present);
+    await startTurn(session, repo);
+    writeFileSync(join(repo, "a.md"), "1");
+    assert.equal((await checkTurn(session, repo)).note, undefined);
+  });
+});
+
+describe("a gate with a problem of its own", () => {
+  test("is left out and named, while the other gates of the file still run", async () => {
+    gates(
+      { name: "broken", severity: "error", files: "\\.ts$", run: ["true"], extra: 1 },
+      { name: "fine", severity: "error", files: "\\.ts$", run: ["true"] },
+    );
+    await startTurn(session, repo);
+    writeFileSync(join(repo, "a.ts"), "1");
+    const turn = await checkTurn(session, repo);
+    assert.deepEqual(
+      turn.outcomes.map(({ name }) => name),
+      ["fine"],
+    );
+    assert.match(turn.note ?? "", /^broken not run, its entry is wrong: unknown field extra$/m);
   });
 });

@@ -23,15 +23,13 @@
       "name": "related-node-tests",
       "severity": "error",
       "files": "^src/.*\\.ts$",
-      "run": ["{engine}/src/helpers/related-tests.ts", "--tests", "^src/.*\\.test\\.ts$", "{files}"],
-      "timeoutSeconds": 60
+      "run": ["{engine}/src/helpers/related-tests.ts", "--tests", "^src/.*\\.test\\.ts$", "{files}"]
     },
     {
       "name": "integration",
       "severity": "error",
       "files": "^(integration/|catalog/)",
-      "run": ["node", "--test", "integration/*.test.ts"],
-      "timeoutSeconds": 60
+      "run": ["node", "--test", "integration/*.test.ts"]
     },
     {
       "name": "no-new-clones",

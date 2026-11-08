@@ -1,12 +1,12 @@
 import type { CheckedTurn } from "./check.ts";
-import type { Outcome } from "./run.ts";
+import { failed, type Outcome } from "./run.ts";
 
 const LABEL = "● gates";
 const SHOWN_PASSES = 6;
 const REPORT_CHARS = 4000;
 const HEAD_CHARS = 1000;
 
-const TONES = { pass: "1;32", fail: "1;31", dim: "2" } as const;
+const TONES = { pass: "1;32", fail: "1;31", late: "1;33", dim: "2" } as const;
 
 function paint(tone: keyof typeof TONES, text: string): string {
   return `\x1b[${TONES[tone]}m${text}\x1b[0m`;
@@ -38,15 +38,20 @@ function nothingChecked({ changed, skipped }: CheckedTurn): string[] {
 }
 
 function resultLines({ outcomes, skipped, ms }: CheckedTurn, onFailure: string): string[] {
-  const failed = outcomes.filter((outcome) => !outcome.ok).sort((a, b) => b.ms - a.ms);
-  const passed = outcomes.filter((outcome) => outcome.ok).sort((a, b) => b.ms - a.ms);
-  const after = failed.length && onFailure ? ` · ${onFailure}` : "";
+  const slowest = (a: Outcome, b: Outcome) => b.ms - a.ms;
+  const red = outcomes.filter(failed).sort(slowest);
+  const late = outcomes.filter((outcome) => outcome.timedOut).sort(slowest);
+  const passed = outcomes.filter((outcome) => outcome.ok).sort(slowest);
+  const after = red.length && onFailure ? ` · ${onFailure}` : "";
+  const outOfTime = late.length ? ` · ${late.length} out of time` : "";
   const notRun = skipped.length ? ` · ${skipped.length} skipped` : "";
   const shown = passed.slice(0, SHOWN_PASSES).map((outcome) => gateLine(paint("pass", "✓"), outcome));
   const rest = passed.length - shown.length;
+  const tone = red.length ? "fail" : late.length ? "late" : "pass";
   return [
-    `${paint(failed.length ? "fail" : "pass", LABEL)}  ${passed.length}/${outcomes.length} gates green in ${duration(ms)}${notRun}${after}`,
-    ...failed.map((outcome) => gateLine(paint("fail", "✗"), outcome)),
+    `${paint(tone, LABEL)}  ${passed.length}/${outcomes.length} gates green in ${duration(ms)}${outOfTime}${notRun}${after}`,
+    ...red.map((outcome) => gateLine(paint("fail", "✗"), outcome)),
+    ...late.map((outcome) => gateLine(paint("late", "⏱"), outcome)),
     ...(passed.length ? [[...shown, ...(rest > 0 ? [paint("dim", `... +${rest}`)] : [])].join("  ")] : []),
     ...(skipped.length ? [skippedLine(skipped)] : []),
   ];
@@ -75,9 +80,28 @@ const CONDUCT = [
   "owner and hand back.",
 ].join(" ");
 
+/** What the owner sees when the gates of the repo miss tools on this machine, as the agent is asked to install them. */
+export function toolsMissing(missing: string[]): string {
+  const gates = missing.length === 1 ? "1 gate is off" : `${missing.length} gates are off`;
+  const lines = missing.map((tool) => paint("dim", `- ${tool}`));
+  return [`${paint("fail", LABEL)}  ${gates}, a tool is missing: the agent is asked to install it`, ...lines].join(
+    "\n",
+  );
+}
+
+/** What the agent is told when the gates of the repo miss tools: install them, or the gates that need them stay off. */
+export function toolsToInstall(missing: string[]): string {
+  return [
+    "Some gates of this repo cannot run on this machine, for a missing tool:",
+    ...missing.map((tool) => `- ${tool}`),
+    "Install these tools first. If they cannot be installed, or the developer refuses, say so and go on with the",
+    "prompt: the gates that need them stay off until they are installed, and every other gate still runs.",
+  ].join("\n");
+}
+
 /** The report of each failed gate, under its name. */
 export function reports(outcomes: Outcome[]): string[] {
-  return outcomes.filter((outcome) => !outcome.ok).map(({ name, output }) => `## ${name}\n${excerpt(output)}`);
+  return outcomes.filter(failed).map(({ name, output }) => `## ${name}\n${excerpt(output)}`);
 }
 
 /** What the agent gets when it is sent back: how to act on a failure, the note of the check, each failed report. */

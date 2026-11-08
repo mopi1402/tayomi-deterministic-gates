@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { changedGatesFiles, type Gate, gatesOf, isCompared, readGatesFiles } from "./config.ts";
+import { changedGatesFiles, type Gate, type Gates, gatesOf, isCompared, readGatesFiles } from "./config.ts";
 import { cachedReports, cacheReports } from "./report-cache.ts";
-import { check, filesOf, givenFiles, type Outcome, wholeProject } from "./run.ts";
+import { check, filesOf, givenFiles, missingTool, type Outcome, wholeProject } from "./run.ts";
 import { changedSince, emptyCommit, hasCommit, lastCommit, snapshot, workingTree } from "./snapshot.ts";
 import { readTurn, type TurnState, writeTurn } from "./turn-state.ts";
 
@@ -23,17 +23,38 @@ interface Result {
 /** The report a compared gate compares with, or nothing when the turn has none for it. */
 type Baselines = (gate: Gate) => string | undefined;
 
+/** A gate whose program this machine does not have, with why. It never runs, so it never sends the agent back. */
+interface Missing {
+  gate: Gate;
+  why: string;
+}
+
+function missingTools(root: string, gates: Gate[]): Missing[] {
+  return gates.flatMap((gate) => {
+    const why = missingTool(root, gate);
+    return why === undefined ? [] : [{ gate, why }];
+  });
+}
+
+function runnable(gates: Gate[], missing: Missing[]): Gate[] {
+  return gates.filter((gate) => !missing.some((tool) => tool.gate === gate));
+}
+
 /**
  * Records the commit a turn starts from, and the reports its compared gates will compare with. After an interrupted
  * turn, the next one of the repo starts where it did, so its check also covers what the interrupted one changed.
+ * Gives, gate by gate, the tools this machine misses to run the gates of the repo.
  */
-export async function startTurn(session: string, root: string): Promise<void> {
+export async function startTurn(session: string, root: string): Promise<string[]> {
   const config = readGatesFiles(root);
-  const compared = gatesOf(config).filter(isCompared);
+  const { gates } = gatesOf(config);
+  const missing = missingTools(root, gates);
+  const told = missing.map(({ gate, why }) => `${gate.name}: ${why}`);
+  const compared = runnable(gates, missing).filter(isCompared);
   const interrupted = readTurn(session, root);
   if (interrupted?.checked === false) {
     writeTurn(session, root, interrupted);
-    return;
+    return told;
   }
   const { commit: start, tree } = snapshot(root);
   const cached = cachedReports(root, tree);
@@ -59,6 +80,7 @@ export async function startTurn(session: string, root: string): Promise<void> {
     config,
     checked: false,
   });
+  return told;
 }
 
 /**
@@ -102,8 +124,9 @@ export async function checkAll(root: string): Promise<CheckedTurn> {
   const started = performance.now();
   const empty = emptyCommit(root);
   const files = changedSince(root, empty);
-  const results = await runGates(root, gatesOf(readGatesFiles(root)), files, empty, () => "");
-  return checkedTurn(files, results, started, []);
+  const { gates, refused } = gatesOf(readGatesFiles(root));
+  const results = await runGates(root, gates, files, empty, () => "");
+  return checkedTurn(files, results, started, refusedNotes(refused));
 }
 
 // A report holds for the tree a turn ends on only if the gate ran clean on the whole project. A gate that failed
@@ -143,15 +166,31 @@ export async function checkTurn(session: string, root: string): Promise<CheckedT
   const started = performance.now();
   const end = workingTree(root);
   const changed = changedSince(root, turn.start, end);
-  const results = await runGates(root, gatesOf(turn.config), changed, turn.start, baselines);
+  const { gates, refused } = gatesOf(turn.config);
+  const missing = missingTools(root, gates);
+  const results = await runGates(root, runnable(gates, missing), changed, turn.start, baselines);
   cacheReports(root, end, endReports(results, baselines));
   writeTurn(session, root, { ...turn, checked: true });
   // A compared gate with no report from the turn start can only count its exit code: a green it did not earn is said.
   const uncompared = results
     .filter(({ gate, outcome }) => outcome && isCompared(gate) && baselines(gate) === undefined)
     .map(({ gate }) => `${gate.name} not compared: no report from the turn start, only its exit code counted`);
-  const notes = [...(startNote ? [startNote] : []), ...configNote(changedGatesFiles(turn.config, now)), ...uncompared];
+  // Only a gate the turn concerned is named: one that would not have run anyway costs nothing to miss.
+  const notRun = missing
+    .filter(({ gate }) => filesOf(gate, changed).length)
+    .map(({ gate, why }) => `${gate.name} not run: ${why}`);
+  const notes = [
+    ...(startNote ? [startNote] : []),
+    ...configNote(changedGatesFiles(turn.config, now)),
+    ...uncompared,
+    ...refusedNotes(refused),
+    ...notRun,
+  ];
   return checkedTurn(changed, results, started, notes);
+}
+
+function refusedNotes(refused: Gates["refused"]): string[] {
+  return refused.map(({ name, why }) => `${name} not run, its entry is wrong: ${why}`);
 }
 
 function configNote(changedFiles: string[]): string[] {

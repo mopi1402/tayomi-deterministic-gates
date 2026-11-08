@@ -2,3 +2,4 @@ node_modules/
 .tayomi/
 /.gates.local.json
 /.claude/settings.local.json
+/tmp/

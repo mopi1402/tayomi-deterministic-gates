@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, test } from "node:test";
 import { tempRepo } from "../testing.ts";
-import { configuredRoot, parseGates } from "./config.ts";
+import { configuredRoot, parseGates, readGates } from "./config.ts";
 
 const lint = { name: "lint", severity: "error", files: "\\.ts$", run: ["eslint"] };
 
@@ -15,7 +15,7 @@ function file(...gates: object[]): string {
 describe("parseGates", () => {
   test("leaves out the gates turned off, and gives each a timeout", () => {
     const text = file(lint, { name: "dead", severity: "off", files: "\\.ts$", run: ["knip"] });
-    assert.deepEqual(parseGates(text), [{ ...lint, timeoutSeconds: 30 }]);
+    assert.deepEqual(parseGates(text), [{ ...lint, timeoutSeconds: 45 }]);
   });
 
   test("keeps the optional fields it is given", () => {
@@ -26,7 +26,19 @@ describe("parseGates", () => {
   test("refuses an unknown severity or field, and a file with another shape", () => {
     assert.throws(() => parseGates(file({ ...lint, severity: "fatal" })));
     assert.throws(() => parseGates(file({ ...lint, extra: 1 })), /unknown field extra/);
-    assert.throws(() => parseGates(JSON.stringify({ invariants: [lint] })), /holds one field, "gates"/);
+    assert.throws(() => parseGates(JSON.stringify({ invariants: [lint] })), /holds "gates", a list of gates/);
+    assert.throws(() => parseGates("[]"), /holds "gates", a list of gates/);
+  });
+
+  test("leaves out a gate with a problem of its own and keeps the others, as a check reads them", () => {
+    const read = readGates(
+      file({ ...lint, name: "broken", extra: 1 }, lint, { ...lint, name: "off", severity: "off", x: 1 }),
+    );
+    assert.deepEqual(
+      read.gates.map(({ name }) => name),
+      ["lint"],
+    );
+    assert.deepEqual(read.refused, [{ name: "broken", why: "unknown field extra" }]);
   });
 
   test("names the file it cannot read as JSON", () => {
@@ -38,8 +50,16 @@ describe("parseGates", () => {
     assert.throws(() => parseGates(file({ ...lint, severity: "warn" })), /a warning sends nobody back/);
   });
 
-  test("refuses a check slower than the end of a turn allows", () => {
-    assert.throws(() => parseGates(file({ ...lint, timeoutSeconds: 180 })), /belongs in CI/);
+  test("gives a gate the time of the check, 45 seconds unless the repo says otherwise, and never more", () => {
+    assert.equal(parseGates(file({ ...lint, timeoutSeconds: 60 }))[0]?.timeoutSeconds, 45);
+    const slower = JSON.stringify({ gates: [{ ...lint, timeoutSeconds: 45 }], maxTimeoutSeconds: 60 });
+    assert.equal(parseGates(slower)[0]?.timeoutSeconds, 45);
+  });
+
+  test("takes the time of the check from the local file over the shared one", () => {
+    const shared = JSON.stringify({ gates: [lint], maxTimeoutSeconds: 60 });
+    assert.equal(parseGates(shared, JSON.stringify({ maxTimeoutSeconds: 10 }))[0]?.timeoutSeconds, 10);
+    assert.throws(() => parseGates(file(lint), JSON.stringify({ maxTimeoutSeconds: "30" })), /positive number/);
   });
 
   test("refuses a compared gate given the files, since it reads the whole project", () => {

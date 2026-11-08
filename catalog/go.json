@@ -14,8 +14,7 @@
         "name": "build",
         "severity": "error",
         "files": "(\\.go|(^|/)go\\.(mod|sum))$",
-        "run": ["go", "build", "./..."],
-        "timeoutSeconds": 60
+        "run": ["go", "build", "./..."]
       }
     },
     {
@@ -30,8 +29,7 @@
         "name": "vet",
         "severity": "error",
         "files": "(\\.go|(^|/)go\\.(mod|sum))$",
-        "run": ["go", "vet", "./..."],
-        "timeoutSeconds": 60
+        "run": ["go", "vet", "./..."]
       }
     },
     {
@@ -62,8 +60,7 @@
         "name": "test",
         "severity": "error",
         "files": "(\\.go|(^|/)go\\.(mod|sum))$",
-        "run": ["go", "test", "./..."],
-        "timeoutSeconds": 60
+        "run": ["go", "test", "./..."]
       }
     },
     {
@@ -78,8 +75,7 @@
         "name": "lint",
         "severity": "error",
         "files": "\\.go$",
-        "run": ["golangci-lint", "run", "--new-from-rev", "{turn}"],
-        "timeoutSeconds": 60
+        "run": ["golangci-lint", "run", "--new-from-rev", "{turn}"]
       }
     },
     {

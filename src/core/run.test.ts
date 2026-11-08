@@ -4,7 +4,17 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import type { Gate } from "./config.ts";
-import { argumentsOf, type Command, check, commandOf, filesOf, newLines, wholeProject } from "./run.ts";
+import {
+  argumentsOf,
+  type Command,
+  check,
+  commandOf,
+  failed,
+  filesOf,
+  missingTool,
+  newLines,
+  wholeProject,
+} from "./run.ts";
 
 const LINT: Gate = {
   name: "lint",
@@ -82,6 +92,22 @@ describe("commandOf", () => {
   });
 });
 
+describe("missingTool", () => {
+  const gate = (name: string): Gate => ({ ...LINT, run: [name] });
+
+  test("finds a program on the PATH, a package of node_modules, a script of the engine, and Node for a script", () => {
+    mkdirSync(join(root, "node_modules", "eslint"), { recursive: true });
+    writeFileSync(join(root, "node_modules", "eslint", "package.json"), JSON.stringify({ bin: "./bin/eslint.js" }));
+    for (const name of ["git", "eslint", "{engine}/src/helpers/new-clones.ts", "scripts/tool.mjs"])
+      assert.equal(missingTool(root, gate(name)), undefined, name);
+  });
+
+  test("says why a program is missing from the PATH, or from its path in the repo", () => {
+    assert.match(missingTool(root, gate("no-such-tool")) ?? "", /no-such-tool is not installed/);
+    assert.match(missingTool(root, gate(".venv/bin/ruff")) ?? "", /\.venv\/bin\/ruff does not exist/);
+  });
+});
+
 describe("newLines", () => {
   test("keeps only the lines the turn added, less the ignored ones", () => {
     const before = "Unused exports (1)\nsrc/a.ts: old";
@@ -153,11 +179,13 @@ describe("check, compared with the turn start", () => {
     assert.equal(outcome.report, undefined);
   });
 
-  test("fails when the command times out, even if it timed out as the turn started", async () => {
+  test("neither passes nor fails when the command runs out of time, even if it did as the turn started", async () => {
     tool("setTimeout(() => {}, 10_000)");
     const slow = { ...COMPARED, timeoutSeconds: 0.2 };
     const outcome = await check(root, slow, [], "abc", (await wholeProject(root, slow)).output);
     assert.equal(outcome.ok, false);
-    assert.match(outcome.output, /Timed out/);
+    assert.equal(outcome.timedOut, true);
+    assert.equal(failed(outcome), false);
+    assert.match(outcome.output, /Out of time after 0\.2 s, so not judged/);
   });
 });
