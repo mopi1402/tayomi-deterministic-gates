@@ -15,6 +15,9 @@ const NODE_TESTS = new RegExp(
   `(\\.test|[-_]test|^test|/test)${EXTENSION}$|/test/.*${EXTENSION}$|(^|/)test-[^/]*${EXTENSION}$`,
 );
 
+/** Fails on a changed file no test reaches, which the related tests alone pass in silence. */
+const REQUIRE_TESTS = "--require-tests";
+
 // An import of types only runs nothing: the type check is the gate that covers it.
 const SPECIFIERS =
   /(?:^|[\s;])(?:import|export)\b(?!\s+type\b)[^'"]*?\bfrom\s*['"]([^'"]+)['"]|(?:^|[\s;])import\s*['"]([^'"]+)['"]/g;
@@ -47,30 +50,59 @@ function importsOf(files: Set<string>, file: string): string[] {
   });
 }
 
-/** The test files of the repo, by the given naming, that import one of the changed files, directly or not. */
-export function relatedTests(root: string, changed: string[], tests: RegExp): string[] {
+/**
+ * For each test file of the repo, by the given naming, the changed files it imports, directly or not. A changed test
+ * file reaches itself.
+ */
+function reachedBy(root: string, changed: string[], tests: RegExp): Map<string, Set<string>> {
   const files = listFiles(root);
   const known = new Set(files.map((file) => resolve(root, file)));
-  const changedSet = new Set(changed.map((file) => resolve(root, file)));
+  const changedByPath = new Map(changed.map((file) => [resolve(root, file), file]));
   const imports = new Map<string, string[]>();
-  const reaches = (file: string, seen: Set<string>): boolean => {
-    if (changedSet.has(file)) return true;
-    if (seen.has(file)) return false;
+  const walk = (file: string, seen: Set<string>, reached: Set<string>): void => {
+    if (seen.has(file)) return;
     seen.add(file);
+    const name = changedByPath.get(file);
+    if (name !== undefined) reached.add(name);
     if (!imports.has(file)) imports.set(file, importsOf(known, file));
-    return (imports.get(file) ?? []).some((imported) => reaches(imported, seen));
+    for (const imported of imports.get(file) ?? []) walk(imported, seen, reached);
   };
-  return files
-    .filter((file) => tests.test(file))
-    .filter((file) => reaches(resolve(root, file), new Set()))
+  return new Map(
+    files
+      .filter((file) => tests.test(file))
+      .map((file) => {
+        const reached = new Set<string>();
+        walk(resolve(root, file), new Set(), reached);
+        return [file, reached] as const;
+      }),
+  );
+}
+
+// The tests that reach a changed file, in order.
+function testsReaching(reached: Map<string, Set<string>>): string[] {
+  return [...reached]
+    .filter(([, files]) => files.size)
+    .map(([test]) => test)
     .sort();
+}
+
+/** The test files of the repo, by the given naming, that import one of the changed files, directly or not. */
+export function relatedTests(root: string, changed: string[], tests: RegExp): string[] {
+  return testsReaching(reachedBy(root, changed, tests));
 }
 
 function main(args: string[]): void {
   const option = args.indexOf("--tests");
   const tests = option === -1 ? NODE_TESTS : new RegExp(args[option + 1] ?? "");
-  const changed = option === -1 ? args : [...args.slice(0, option), ...args.slice(option + 2)];
-  const related = relatedTests(process.cwd(), changed, tests);
+  const rest = option === -1 ? args : [...args.slice(0, option), ...args.slice(option + 2)];
+  const requireTests = rest.includes(REQUIRE_TESTS);
+  const changed = rest.filter((arg) => arg !== REQUIRE_TESTS);
+  const reached = reachedBy(process.cwd(), changed, tests);
+  const tested = new Set([...reached.values()].flatMap((files) => [...files]));
+  const untested = requireTests ? changed.filter((file) => !tested.has(file)) : [];
+  for (const file of untested) console.log(`No test reaches ${file}: write one that imports it.`);
+  if (untested.length) process.exitCode = 1;
+  const related = testsReaching(reached);
   if (!related.length) return;
   // Run as a test runner of its own, even from inside another node --test, as the tests of this engine do.
   const { NODE_TEST_CONTEXT: _nested, ...env } = process.env;
@@ -80,7 +112,7 @@ function main(args: string[]): void {
     ["--test", `--test-reporter=${reporter}`, "--test-reporter-destination=stdout", ...related],
     { stdio: "inherit", env },
   );
-  process.exitCode = run.status ?? 1;
+  if (run.status !== 0) process.exitCode = run.status ?? 1;
 }
 
 if (import.meta.main) main(process.argv.slice(2));

@@ -316,7 +316,7 @@ summary { cursor: pointer; color: var(--muted); }
 </article>
 <article id="typescript/related-node-tests">
 <h3><code>typescript/related-node-tests</code></h3>
-<p>Runs only the node:test tests that import a changed file, directly or not, for a repo that tests with Node itself. Node has no related mode: the helper follows the imports. It finds the tests by Node's own naming; --tests &lt;regex&gt; narrows it.</p>
+<p>Runs only the node:test tests that import a changed file, directly or not, for a repo that tests with Node itself. Node has no related mode: the helper follows the imports. It finds the tests by Node's own naming; --tests &lt;regex&gt; narrows it, and --require-tests also fails on a changed file no test reaches, which the related tests alone pass in silence.</p>
 <dl>
 <dt>Runs</dt><dd><code>{engine}/src/helpers/related-tests.ts {files}</code></dd>
 <dt>When the turn changes</dt><dd><code>\.(ts|mts|cts|js|mjs|cjs)$</code></dd>

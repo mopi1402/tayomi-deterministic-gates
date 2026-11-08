@@ -114,6 +114,31 @@ describe("the helper", () => {
     assert.equal(run.status, 0);
     assert.equal(run.stdout, "");
   });
+
+  test("with --require-tests, fails on each changed file no test reaches, and still runs the related tests", () => {
+    write({
+      "src/a.ts": "export const a = 1;",
+      "src/b.ts": "export const b = 1;",
+      "src/a-test.ts":
+        'import { test } from "node:test";\nimport { a } from "./a.ts";\ntest("a", () => { if (a !== 2) throw new Error("a is not 2"); });',
+    });
+    const run = helper("--require-tests", "src/a.ts", "src/b.ts");
+    assert.equal(run.status, 1);
+    assert.match(run.stdout, /^No test reaches src\/b\.ts: write one that imports it\.\n/);
+    assert.doesNotMatch(run.stdout, /No test reaches src\/a\.ts/);
+    assert.match(run.stdout, /a is not 2/);
+  });
+
+  test("with --require-tests, passes when every changed file is reached, a changed test reaching itself", () => {
+    write({
+      "src/a.ts": "export const a = 1;",
+      "src/a-test.ts":
+        'import { test } from "node:test";\nimport { a } from "./a.ts";\ntest("a", () => { if (a !== 1) throw new Error("no"); });',
+    });
+    const run = helper("--require-tests", "src/a.ts", "src/a-test.ts");
+    assert.equal(run.status, 0);
+    assert.doesNotMatch(run.stdout, /No test reaches/);
+  });
 });
 
 describe("the reporter", () => {

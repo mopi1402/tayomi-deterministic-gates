@@ -23,7 +23,7 @@
       "name": "related-node-tests",
       "severity": "error",
       "files": "^src/.*\\.ts$",
-      "run": ["{engine}/src/helpers/related-tests.ts", "--tests", "^src/.*\\.test\\.ts$", "{files}"]
+      "run": ["{engine}/src/helpers/related-tests.ts", "--require-tests", "--tests", "^src/.*\\.test\\.ts$", "{files}"]
     },
     {
       "name": "integration",

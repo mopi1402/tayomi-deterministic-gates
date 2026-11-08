@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+
+- `--require-tests` on the `related-node-tests` helper fails on each changed file no test reaches, where the related tests alone pass in silence
+
 ## 0.2.0
 
 ### Added
