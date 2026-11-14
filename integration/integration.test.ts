@@ -167,6 +167,17 @@ function missingTools(technology: string, entry: Entry): string[] {
   return entry.requires.map(({ tool }) => tool).filter((tool) => !installed(technology, tool));
 }
 
+// A gate whose tool is missing fails its test, with how to install it: a test passed over in silence would let a gate
+// of the catalog go untested with every check green.
+function assertInstalled(technology: string, entry: Entry): void {
+  const missing = entry.requires.filter(({ tool }) => missingTools(technology, entry).includes(tool));
+  assert.deepEqual(
+    missing.map(({ tool }) => tool),
+    [],
+    missing.map(({ tool, install }) => `${tool} is not installed: ${install}`).join("\n"),
+  );
+}
+
 /** A copy of the sample as a repo of its own, with the given gates, that the agent works in. */
 function project(technology: string, entries: Entry[]) {
   const sample = sampleDir(technology);
@@ -214,9 +225,11 @@ for (const catalog of readCatalogs(CATALOG_DIR)) {
     });
     if (sample === undefined) return;
 
+    // The gates whose tools are installed: a turn whose gates miss a tool starts by asking for it.
     const runnable = catalog.entries.filter((entry) => !missingTools(catalog.id, entry).length);
 
-    test("passes every gate on a clean change", { skip: runnable.length ? false : "no tool installed" }, async () => {
+    test("passes every gate on a clean change", async () => {
+      for (const entry of catalog.entries) assertInstalled(catalog.id, entry);
       const { decision, systemMessage } = await turn(catalog.id, runnable, sample.clean);
       assert.equal(decision, undefined, systemMessage);
       assert.match(systemMessage, new RegExp(`${runnable.length}/${runnable.length} gates green`));
@@ -225,9 +238,9 @@ for (const catalog of readCatalogs(CATALOG_DIR)) {
 
     for (const fault of sample.faults) {
       const entry = catalog.entries.find(({ gate }) => gate.name === fault.gate);
-      const missing = entry ? missingTools(catalog.id, entry) : [];
-      const skip = entry === undefined || missing.length ? `${missing.join(", ")} not installed` : false;
-      test(`${fault.gate} catches ${fault.what}`, { skip }, async () => {
+      test(`${fault.gate} catches ${fault.what}`, async () => {
+        assert.ok(entry, `the catalog has no gate ${fault.gate}`);
+        assertInstalled(catalog.id, entry);
         const { decision, reason, systemMessage } = await turn(catalog.id, runnable, fault.edits);
         assert.equal(decision, "block", systemMessage);
         assert.match(reason ?? "", new RegExp(`^## ${fault.gate}\\n`, "m"));

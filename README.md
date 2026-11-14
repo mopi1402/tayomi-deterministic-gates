@@ -121,7 +121,9 @@ pnpm integration
 
 This repo runs under its own gates, in its `.gates.json`, and no gate runs a whole test suite at the end of a turn: that is what `pnpm check`, `pnpm integration` and `node src/cli.ts check` are for.
 
-`integration/` holds a sample project per catalog. The integration tests play an agent's turn on each, with no agent and no model: a clean change passes every gate, and each gate catches the fault written for it. To add a gate to a catalog, edit its file, write its fault, and run `pnpm catalog` to regenerate the page.
+`integration/` holds a sample project per catalog. The integration tests play an agent's turn on each, with no agent and no model: a clean change passes every gate, and each gate catches the fault written for it. A gate whose tool is not installed fails its test, with how to install it: every tool the catalogs require is needed. To add a gate to a catalog, edit its file, write its fault, and run `pnpm catalog` to regenerate the page.
+
+CI runs `pnpm check` and `pnpm integration` on every push and pull request, with the tool of every catalog gate installed. A tool a new gate requires is added to `.github/workflows/ci.yml`.
 
 ## License
 
