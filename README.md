@@ -79,6 +79,8 @@ A gate whose entry is wrong, such as with an unknown field, is left out and name
 
 Next to `gates`, `maxTimeoutSeconds` is the time the gates of a check have, all together: 45 seconds by default. They start at once, and a gate still running then is stopped. It shows out of time, neither green nor red, and never sends the agent back, since nobody knows what it would have said. A slower check belongs in CI.
 
+The summary names the six slowest green gates and counts the rest, as in `... +5`. Set `"showAllPasses": true` next to `gates` to name every one of them, six to a line. A value in `.gates.local.json` wins, so each developer can choose for themselves.
+
 In the arguments, `{files}` expands to the changed files the gate looks at, and `{turn}` to the commit that holds the tree as the turn started.
 
 ## Pick gates from the catalog

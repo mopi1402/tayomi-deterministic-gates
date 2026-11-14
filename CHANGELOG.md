@@ -5,6 +5,7 @@
 ### Added
 
 - `--require-tests` on the `related-node-tests` helper fails on each changed file no test reaches, where the related tests alone pass in silence
+- `showAllPasses`, at the top of `.gates.json` or `.gates.local.json`: the summary names every green gate, six to a line, instead of counting those past the sixth
 
 ## 0.2.0
 

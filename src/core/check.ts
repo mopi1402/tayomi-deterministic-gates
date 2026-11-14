@@ -12,6 +12,7 @@ export interface CheckedTurn {
   skipped: string[];
   ms: number;
   note?: string;
+  showAllPasses?: boolean;
 }
 
 /** A gate of the turn, with its outcome when it ran. */
@@ -105,13 +106,20 @@ function runGates(
   );
 }
 
-function checkedTurn(changed: string[], results: Result[], started: number, notes: string[]): CheckedTurn {
+function checkedTurn(
+  changed: string[],
+  results: Result[],
+  started: number,
+  notes: string[],
+  showAllPasses: boolean,
+): CheckedTurn {
   return {
     changed,
     outcomes: results.flatMap(({ outcome }) => (outcome ? [outcome] : [])),
     skipped: results.filter(({ outcome }) => !outcome).map(({ gate }) => gate.name),
     ms: performance.now() - started,
     note: notes.join("\n") || undefined,
+    ...(showAllPasses ? { showAllPasses } : {}),
   };
 }
 
@@ -124,9 +132,9 @@ export async function checkAll(root: string): Promise<CheckedTurn> {
   const started = performance.now();
   const empty = emptyCommit(root);
   const files = changedSince(root, empty);
-  const { gates, refused } = gatesOf(readGatesFiles(root));
+  const { gates, refused, showAllPasses } = gatesOf(readGatesFiles(root));
   const results = await runGates(root, gates, files, empty, () => "");
-  return checkedTurn(files, results, started, refusedNotes(refused));
+  return checkedTurn(files, results, started, refusedNotes(refused), showAllPasses);
 }
 
 // A report holds for the tree a turn ends on only if the gate ran clean on the whole project. A gate that failed
@@ -166,7 +174,7 @@ export async function checkTurn(session: string, root: string): Promise<CheckedT
   const started = performance.now();
   const end = workingTree(root);
   const changed = changedSince(root, turn.start, end);
-  const { gates, refused } = gatesOf(turn.config);
+  const { gates, refused, showAllPasses } = gatesOf(turn.config);
   const missing = missingTools(root, gates);
   const results = await runGates(root, runnable(gates, missing), changed, turn.start, baselines);
   cacheReports(root, end, endReports(results, baselines));
@@ -186,7 +194,7 @@ export async function checkTurn(session: string, root: string): Promise<CheckedT
     ...refusedNotes(refused),
     ...notRun,
   ];
-  return checkedTurn(changed, results, started, notes);
+  return checkedTurn(changed, results, started, notes, showAllPasses);
 }
 
 function refusedNotes(refused: Gates["refused"]): string[] {

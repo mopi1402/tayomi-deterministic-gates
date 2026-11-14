@@ -37,7 +37,20 @@ function nothingChecked({ changed, skipped }: CheckedTurn): string[] {
   return [`${paint("pass", LABEL)}  no gate looks at the ${files}`, ...(skipped.length ? [skippedLine(skipped)] : [])];
 }
 
-function resultLines({ outcomes, skipped, ms }: CheckedTurn, onFailure: string): string[] {
+// Every pass, as many to a line as the summary shows by default; or the slowest of them, with a count of the rest.
+function passLines(passed: Outcome[], showAll: boolean): string[] {
+  const marked = passed.map((outcome) => gateLine(paint("pass", "✓"), outcome));
+  if (showAll)
+    return Array.from({ length: Math.ceil(marked.length / SHOWN_PASSES) }, (_, line) =>
+      marked.slice(line * SHOWN_PASSES, (line + 1) * SHOWN_PASSES).join("  "),
+    );
+  const rest = marked.length - SHOWN_PASSES;
+  return marked.length
+    ? [[...marked.slice(0, SHOWN_PASSES), ...(rest > 0 ? [paint("dim", `... +${rest}`)] : [])].join("  ")]
+    : [];
+}
+
+function resultLines({ outcomes, skipped, ms, showAllPasses = false }: CheckedTurn, onFailure: string): string[] {
   const slowest = (a: Outcome, b: Outcome) => b.ms - a.ms;
   const red = outcomes.filter(failed).sort(slowest);
   const late = outcomes.filter((outcome) => outcome.timedOut).sort(slowest);
@@ -45,14 +58,12 @@ function resultLines({ outcomes, skipped, ms }: CheckedTurn, onFailure: string):
   const after = red.length && onFailure ? ` · ${onFailure}` : "";
   const outOfTime = late.length ? ` · ${late.length} out of time` : "";
   const notRun = skipped.length ? ` · ${skipped.length} skipped` : "";
-  const shown = passed.slice(0, SHOWN_PASSES).map((outcome) => gateLine(paint("pass", "✓"), outcome));
-  const rest = passed.length - shown.length;
   const tone = red.length ? "fail" : late.length ? "late" : "pass";
   return [
     `${paint(tone, LABEL)}  ${passed.length}/${outcomes.length} gates green in ${duration(ms)}${outOfTime}${notRun}${after}`,
     ...red.map((outcome) => gateLine(paint("fail", "✗"), outcome)),
     ...late.map((outcome) => gateLine(paint("late", "⏱"), outcome)),
-    ...(passed.length ? [[...shown, ...(rest > 0 ? [paint("dim", `... +${rest}`)] : [])].join("  ")] : []),
+    ...passLines(passed, showAllPasses),
     ...(skipped.length ? [skippedLine(skipped)] : []),
   ];
 }

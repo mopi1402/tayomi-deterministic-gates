@@ -42,6 +42,14 @@ describe("summary", () => {
     assert.match(shown(summary(ran(outcomes, [], 200))).at(-1) ?? "", /✓ i5 95 ms {2}\.\.\. \+2$/);
   });
 
+  test("names every pass, six to a line, when the repo asks for all of them", () => {
+    const outcomes = Array.from({ length: 8 }, (_, index) => outcome(`i${index}`, true, 100 - index));
+    assert.deepEqual(shown(summary({ ...ran(outcomes, [], 200), showAllPasses: true })).slice(1), [
+      "✓ i0 100 ms  ✓ i1 99 ms  ✓ i2 98 ms  ✓ i3 97 ms  ✓ i4 96 ms  ✓ i5 95 ms",
+      "✓ i6 94 ms  ✓ i7 93 ms",
+    ]);
+  });
+
   test("names the gates the turn did not concern, after the passes", () => {
     const lines = shown(summary(ran([outcome("lint", true, 2000)], ["tests", "clones"], 2100)));
     assert.equal(lines[0], "● gates  1/1 gates green in 2.1 s · 2 skipped");

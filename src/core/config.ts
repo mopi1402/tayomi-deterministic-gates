@@ -36,10 +36,11 @@ function refuse(problem: string): never {
   throw new Error(problem);
 }
 
-/** What a gates file holds: its gates, and the most seconds a gate of the repo may take, when it says. */
+/** What a gates file holds: its gates, and when it says, the most seconds a gate may take and how passes show. */
 interface GatesFile {
   entries: Entry[];
   maxTimeoutSeconds?: unknown;
+  showAllPasses?: unknown;
 }
 
 function fileOf(text: string | undefined, file: string): GatesFile {
@@ -50,16 +51,21 @@ function fileOf(text: string | undefined, file: string): GatesFile {
   } catch (error) {
     throw new Error(`${file} is not valid JSON: ${messageOf(error)}.`);
   }
-  const { gates = [], maxTimeoutSeconds, ...others } = isRecord(parsed) ? parsed : { others: true };
+  const { gates = [], maxTimeoutSeconds, showAllPasses, ...others } = isRecord(parsed) ? parsed : { others: true };
   if (!Array.isArray(gates) || Object.keys(others).length)
     throw new Error(
-      `${file} holds "gates", a list of gates, and "maxTimeoutSeconds", the most seconds a gate may take.`,
+      `${file} holds "gates", a list of gates, "maxTimeoutSeconds", the most seconds a gate may take, and ` +
+        `"showAllPasses", to name every green gate.`,
     );
   const entries = gates.map((entry: unknown) => {
     if (!isRecord(entry) || typeof entry.name !== "string") throw new Error(`${file}: every gate has a name.`);
     return { ...entry, name: entry.name };
   });
-  return { entries, ...(maxTimeoutSeconds === undefined ? {} : { maxTimeoutSeconds }) };
+  return {
+    entries,
+    ...(maxTimeoutSeconds === undefined ? {} : { maxTimeoutSeconds }),
+    ...(showAllPasses === undefined ? {} : { showAllPasses }),
+  };
 }
 
 // The local file's own value wins, as for the fields of a gate.
@@ -67,6 +73,13 @@ function maxTimeoutOf(shared: GatesFile, local: GatesFile): number {
   const max = local.maxTimeoutSeconds ?? shared.maxTimeoutSeconds ?? DEFAULT_MAX_TIMEOUT_SECONDS;
   if (typeof max !== "number" || max <= 0) throw new Error("maxTimeoutSeconds is a positive number.");
   return max;
+}
+
+// Off by default: the summary names the slowest passes and counts the rest.
+function showAllPassesOf(shared: GatesFile, local: GatesFile): boolean {
+  const show = local.showAllPasses ?? shared.showAllPasses ?? false;
+  if (typeof show !== "boolean") throw new Error("showAllPasses is true or false.");
+  return show;
 }
 
 function isPattern(value: unknown): value is string {
@@ -105,10 +118,11 @@ function toGate(entry: Entry, maxTimeoutSeconds: number): Gate {
   };
 }
 
-/** The gates a check runs, and the ones it leaves out for a problem of their own, with why. */
+/** The gates a check runs, the ones it leaves out for a problem of their own, with why, and how passes show. */
 export interface Gates {
   gates: Gate[];
   refused: { name: string; why: string }[];
+  showAllPasses: boolean;
 }
 
 /**
@@ -122,7 +136,7 @@ export function readGates(shared: string | undefined, local?: string): Gates {
   const max = maxTimeoutOf(sharedFile, localFile);
   const merged = new Map(sharedFile.entries.map((entry) => [entry.name, entry]));
   for (const entry of localFile.entries) merged.set(entry.name, { ...merged.get(entry.name), ...entry });
-  const read: Gates = { gates: [], refused: [] };
+  const read: Gates = { gates: [], refused: [], showAllPasses: showAllPassesOf(sharedFile, localFile) };
   for (const entry of merged.values()) {
     if (entry.severity === "off") continue;
     try {
