@@ -4,28 +4,38 @@ on:
   push:
   pull_request:
 
+# Read only, whatever the repo's default: the tests need nothing more.
+permissions:
+  contents: read
+
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
-      - uses: actions/checkout@v7
+      # Each action is pinned to the commit of its release: a tag can be moved to other code, a commit cannot.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       # The engine needs Node 24.2 or later; pnpm comes at the version of packageManager.
-      - uses: pnpm/action-setup@v6
-      - uses: actions/setup-node@v7
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 24
           cache: pnpm
 
       # Every tool a catalog gate requires: an integration test fails on a missing one.
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: stable
-      - uses: golangci/golangci-lint-action@v9
+          go-version: 1.27.4
+          # The only go.mod is the sample's, with no dependency to cache.
+          cache: false
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
         with:
           version: v2.15.0
           install-only: true
-      - uses: astral-sh/setup-uv@v10
+      - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
+        with:
+          # Only ruff is installed: no Python dependency to cache.
+          enable-cache: false
       - run: |
           uv tool install ruff@0.17.5
           echo "$(uv tool dir --bin)" >> "$GITHUB_PATH"
