@@ -2,7 +2,7 @@
 
 # deterministic-gates
 
-Deterministic backpressure for coding agents. At the end of each turn, the gates run on what the agent changed. A gate is a tool, never a model: a linter, a type checker, the related tests, a dead-code finder. If a gate fails, the agent is sent back once with the report, while the context is fresh.
+Deterministic backpressure for coding agents. At the end of each turn, the gates run on what the agent changed. A gate is a tool, never a model: a linter, a type checker, the related tests, a dead-code finder. If a gate fails, the agent is sent back with the report until it fixes the gate or says why it leaves it, while the context is fresh.
 
 CI stays the authority for slow and full checks. The gates catch what the agent just wrote, so the review sees what slipped through.
 
@@ -81,6 +81,8 @@ Next to `gates`, `maxTimeoutSeconds` is the time the gates of a check have, all 
 
 The summary names the six slowest green gates and counts the rest, as in `... +5`. Set `"showAllPasses": true` next to `gates` to name every one of them, six to a line. A value in `.gates.local.json` wins, so each developer can choose for themselves.
 
+Next to `gates`, `maxSendBacks` is the most times a turn sends the agent back: 5 by default, and 0 never sends it back. Past it, the agent hands back and the summary says why. A value in `.gates.local.json` wins.
+
 In the arguments, `{files}` expands to the changed files the gate looks at, and `{turn}` to the commit that holds the tree as the turn started.
 
 ## Pick gates from the catalog
@@ -96,7 +98,8 @@ Each developer can add `.gates.local.json` next to `.gates.json`, and add it to 
 1. When a prompt arrives, the engine records the working tree as a commit that no branch points to, without touching the index, the files or any branch.
 2. When the agent stops, it records the tree again and lists the files the turn changed.
 3. Each gate with a matching file runs, all of them in parallel, with the gates as the turn started.
-4. If a gate fails, the agent is sent back once with the reports, told to fix the code and never the check, and to hand back if a report contradicts what it was asked. If it stops again with a gate still failing, only you are told: no loop.
+4. If a gate fails, the agent is sent back with the reports, told to fix the code and never the check. Each stop is checked again from the turn start, so a fix that breaks another gate is caught. The agent is sent back until each red gate is fixed or waived, up to `maxSendBacks` times a turn.
+5. The agent may leave a gate red only when it cannot be fixed, when fixing it goes against what you asked, or when you have to settle a question first. It then writes, in its last message, one line per gate: `[deterministic-gates:<gate>]: waive "<reason>"`. Codex hides the line, as markdown does, and Claude Code shows it. The summary shows the gate in orange, with the reason under it. A waiver lasts the turn, and falls when the report of its gate changes. `check`, and so CI, never reads one: a gate that fails there fails.
 
 [docs/turn.md](docs/turn.md) draws the rest: where the start comes from, how a compared gate reads its report, what the engine keeps between turns, and what the lock covers.
 

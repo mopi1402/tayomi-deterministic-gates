@@ -169,6 +169,8 @@ export async function checkTurn(session: string, root: string): Promise<CheckedT
     baselines: recorded?.baselines ?? {},
     config: recorded?.config ?? now,
     checked: false,
+    // What the earlier stops of the turn told the agent goes on, so its send-backs and waivers add up.
+    ...(recorded?.sendBacks ? { sendBacks: recorded.sendBacks } : {}),
   };
   const baselines: Baselines = (gate) => turn.baselines[gate.name];
   const started = performance.now();

@@ -1,15 +1,16 @@
 import { type CheckedTurn, checkTurn, startTurn } from "../core/check.ts";
-import { configuredRoot } from "../core/config.ts";
+import { configuredRoot, gatesOf } from "../core/config.ts";
 import { isRecord, messageOf, parseJson } from "../core/json.ts";
 import { broken, failures, summary, toolsMissing, toolsToInstall } from "../core/report.ts";
-import { failed } from "../core/run.ts";
-import { forgetTold, forgetTurn, tellOnce, turnRoot } from "../core/turn-state.ts";
+import { type Judged, judge, waivesOf } from "../core/send-back.ts";
+import { forgetTold, forgetTurn, readTurn, tellOnce, turnRoot, writeTurn } from "../core/turn-state.ts";
 
 export interface HookInput {
   session_id?: string;
   stop_hook_active?: boolean;
   cwd?: string;
   source?: string;
+  last_assistant_message?: string;
 }
 
 export interface HookOutput {
@@ -24,23 +25,49 @@ export type HookEvent = "session-start" | "turn-start" | "check";
 export function parseHookInput(text: string): HookInput {
   const input = parseJson(text);
   if (!isRecord(input)) return {};
-  const { session_id, stop_hook_active, cwd, source } = input;
+  const { session_id, stop_hook_active, cwd, source, last_assistant_message } = input;
   return {
     ...(typeof session_id === "string" ? { session_id } : {}),
     ...(typeof stop_hook_active === "boolean" ? { stop_hook_active } : {}),
     ...(typeof cwd === "string" ? { cwd } : {}),
     ...(typeof source === "string" ? { source } : {}),
+    ...(typeof last_assistant_message === "string" ? { last_assistant_message } : {}),
   };
 }
 
+function sendBacks(count: number): string {
+  return count === 1 ? "1 send-back" : `${count} send-backs`;
+}
+
+// How the stop ends, after the totals: sent back, stopped by the cap, or handed back once the agent was sent back.
+function ending({ sendBack, count, max, open }: Judged): string {
+  if (sendBack) return `the agent is sent back to fix it (${count} of ${max})`;
+  if (open.length) return max === 0 ? "send-backs are off" : `stopped after ${sendBacks(count)}`;
+  return count ? `after ${sendBacks(count)}` : "";
+}
+
+// What the agent is told besides the reports: where it stands, and what became of its waive lines.
+function told({ count, max, waived, fallen, unknown, gates }: Judged): string[] {
+  const names = (list: string[]) => list.join(", ");
+  return [
+    `This is send-back ${count} of ${max}.`,
+    ...(waived.length ? [`Waived this turn, not to fix: ${names(waived.map(({ name }) => name))}.`] : []),
+    ...(fallen.length
+      ? [`Your waiver of ${names(fallen)} no longer holds: its report changed. Fix it, or waive it again.`]
+      : []),
+    ...(unknown.length ? [`No gate is named ${names(unknown)}. The gates of this turn: ${names(gates)}.`] : []),
+  ];
+}
+
 /**
- * A failed gate sends the agent back once with the reports. If it stops again with one still failing, only the owner
- * is told, so a gate the agent cannot satisfy never loops.
+ * A red gate the agent did not waive sends it back with the reports, until the turn reaches its cap: a fix that
+ * breaks another gate is caught, and a gate the agent cannot satisfy never loops. The owner sees each stop, the
+ * waived gates with their reasons, and why the turn ended.
  */
-export function stopOutput(turn: CheckedTurn, retry: boolean): HookOutput {
-  const sentBack = turn.outcomes.some(failed) && !retry;
-  const systemMessage = summary(turn, sentBack ? "the agent is sent back to fix it" : "the agent handed back anyway");
-  return sentBack ? { decision: "block", reason: failures(turn), systemMessage } : { systemMessage };
+export function stopOutput(turn: CheckedTurn, judged: Judged): HookOutput {
+  const systemMessage = summary(turn, ending(judged), judged.waived);
+  if (!judged.sendBack) return { systemMessage };
+  return { decision: "block", reason: failures({ ...turn, outcomes: judged.open }, told(judged)), systemMessage };
 }
 
 // When the gates cannot run, such as with a gates file that does not parse, only the owner is told: a crash would
@@ -69,12 +96,27 @@ async function promptHook(session: string, cwd: string): Promise<HookOutput | un
   }
 }
 
-/** A stop checks the repo its turn started in, whatever folder the agent stops in, or that folder's repo otherwise. */
-async function stopHook(session: string, cwd: string, retry: boolean): Promise<HookOutput | undefined> {
+/**
+ * A stop checks the repo its turn started in, whatever folder the agent stops in, or that folder's repo otherwise,
+ * reads the gates the agent's last message waives, and records what it told the agent for the next stop of the turn.
+ */
+async function stopHook(
+  session: string,
+  cwd: string,
+  retry: boolean,
+  message: string,
+): Promise<HookOutput | undefined> {
   const root = turnRoot(session, retry) ?? configuredRoot(cwd);
   if (root === undefined) return undefined;
   try {
-    return stopOutput(await checkTurn(session, root), retry);
+    const checked = await checkTurn(session, root);
+    const turn = readTurn(session, root);
+    if (turn === undefined) throw new Error("the turn was not recorded after its check.");
+    const { gates, refused, maxSendBacks } = gatesOf(turn.config);
+    const names = [...gates.map(({ name }) => name), ...refused.map(({ name }) => name)];
+    const judged = judge(checked, waivesOf(message), names, maxSendBacks, turn.sendBacks);
+    writeTurn(session, root, { ...turn, sendBacks: judged.state });
+    return stopOutput(checked, judged);
   } catch (error) {
     return cannotRun(error);
   }
@@ -85,12 +127,18 @@ async function stopHook(session: string, cwd: string, retry: boolean): Promise<H
  * nothing outside git, or in a repo with no gates file.
  */
 export async function handleHook(event: HookEvent, text: string): Promise<HookOutput | undefined> {
-  const { session_id: session, stop_hook_active: retry = false, cwd = process.cwd(), source } = parseHookInput(text);
+  const {
+    session_id: session,
+    stop_hook_active: retry = false,
+    cwd = process.cwd(),
+    source,
+    last_assistant_message: message = "",
+  } = parseHookInput(text);
   if (session === undefined) return undefined;
   // A session that starts, resumes or is cleared asks again for the missing tools; a compaction goes on as it was.
   if (event === "session-start") {
     if (source !== "compact") forgetTold(session);
     return undefined;
   }
-  return event === "turn-start" ? promptHook(session, cwd) : stopHook(session, cwd, retry);
+  return event === "turn-start" ? promptHook(session, cwd) : stopHook(session, cwd, retry, message);
 }

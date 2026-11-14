@@ -4,16 +4,33 @@ import { join } from "node:path";
 import type { GatesFiles } from "./config.ts";
 import { isRecord, isStringArray, isStringRecord, readJsonFile } from "./json.ts";
 
+/** A red gate the agent chose to leave, with why, bound to the fingerprint of the report it saw. */
+export interface Waiver {
+  reason: string;
+  report: string;
+}
+
+/**
+ * What the stops of a turn have told the agent so far: how many times it was sent back, the gates it waived, and the
+ * fingerprint of each red report of the last check, which a waiver read at the next stop is bound to.
+ */
+export interface SendBacks {
+  count: number;
+  waivers: Record<string, Waiver>;
+  reports: Record<string, string>;
+}
+
 /**
  * What a turn started from: the commit, the reports of its compared gates, and the gates files themselves, since a
  * turn is checked with the gates it started with. A turn the owner interrupts never reaches its check: it stays
- * unchecked until the next turn of its repo.
+ * unchecked until the next turn of its repo. Once checked, what its stops told the agent.
  */
 export interface TurnState {
   start: string;
   baselines: Record<string, string>;
   config: GatesFiles;
   checked: boolean;
+  sendBacks?: SendBacks;
 }
 
 function isGatesFiles(value: unknown): value is GatesFiles {
@@ -41,13 +58,28 @@ function stateFile(session: string): string {
   return join(tmpdir(), `gates-session-${session.replace(/[^\w-]/g, "")}.json`);
 }
 
+function isWaiver(value: unknown): value is Waiver {
+  return isRecord(value) && typeof value.reason === "string" && typeof value.report === "string";
+}
+
+function isSendBacks(value: unknown): value is SendBacks {
+  return (
+    isRecord(value) &&
+    typeof value.count === "number" &&
+    isRecord(value.waivers) &&
+    Object.values(value.waivers).every(isWaiver) &&
+    isStringRecord(value.reports)
+  );
+}
+
 function isTurnState(value: unknown): value is TurnState {
   return (
     isRecord(value) &&
     typeof value.start === "string" &&
     isStringRecord(value.baselines) &&
     isGatesFiles(value.config) &&
-    typeof value.checked === "boolean"
+    typeof value.checked === "boolean" &&
+    (value.sendBacks === undefined || isSendBacks(value.sendBacks))
   );
 }
 

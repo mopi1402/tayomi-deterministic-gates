@@ -1,6 +1,6 @@
 # How a turn is checked, in detail
 
-The README gives the four steps. This page draws them, with what the engine does around them.
+The README gives the steps. This page draws them, with what the engine does around them.
 
 ## The turn
 
@@ -14,13 +14,17 @@ flowchart TD
     work --> stop[The agent stops]
     stop --> changed[The tree is recorded again: the files the turn changed]
     changed --> gates[Each gate with a matching file runs, all in parallel, with the gates as the turn started]
-    gates -- all green --> done[The turn ends]
-    gates -- a gate fails, first stop --> back[The agent is sent back once, with the reports]
+    gates -- each gate green or waived --> done[The turn ends: you see each waived gate with its reason]
+    gates -- a red gate not waived, under the cap --> back[The agent is sent back with the reports: it fixes, or waives with a reason]
     back --> work
-    gates -- a gate fails, second stop --> owner[Only you are told, so a gate the agent cannot satisfy never loops]
+    gates -- a red gate not waived, at the cap --> owner[Only you are told why the turn ended, so a gate the agent cannot satisfy never loops]
 ```
 
-The start commit lives among the loose objects of `.git` until git prunes it, like any object nothing points to. The retry is told by the flag the agent sends with its stop: when another Stop hook of yours sends the agent back first, the engine takes its next check for the retry and sends nobody back.
+The start commit lives among the loose objects of `.git` until git prunes it, like any object nothing points to. The send-backs and the waivers belong to the turn: each stop adds to them, and the next prompt starts from none.
+
+## The waivers
+
+The engine reads the waive lines of the agent's last message as the host hands it over at the stop, and keeps them with the turn. A waiver is bound to the report the agent saw: the one of the stop before, or of this stop when the agent waives before it is sent back. It falls as soon as the report of its gate says something else, and the agent is sent back to judge it again. The numbers of a report do not count, since an edit above a problem moves its line and a runner prints how long it took. A waive line for a gate that is green is let go, and one that names no gate of the turn is pointed out to the agent.
 
 ## Where the start comes from
 

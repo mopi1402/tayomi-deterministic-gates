@@ -70,6 +70,15 @@ describe("parseGates", () => {
     assert.throws(() => readGates(file(lint), JSON.stringify({ showAllPasses: "yes" })), /true or false/);
   });
 
+  test("sends the agent back 5 times a turn unless told otherwise, with the local file over the shared one", () => {
+    assert.equal(readGates(file(lint)).maxSendBacks, 5);
+    const shared = JSON.stringify({ gates: [lint], maxSendBacks: 2 });
+    assert.equal(readGates(shared).maxSendBacks, 2);
+    assert.equal(readGates(shared, JSON.stringify({ maxSendBacks: 0 })).maxSendBacks, 0);
+    for (const wrong of [-1, 1.5, "3"])
+      assert.throws(() => readGates(file(lint), JSON.stringify({ maxSendBacks: wrong })), /whole number, 0 or more/);
+  });
+
   test("refuses a compared gate given the files, since it reads the whole project", () => {
     const dead = { ...lint, run: ["knip", "{files}"], compare: "turn-start" };
     assert.throws(() => parseGates(file(dead)), /takes no \{files\}/);

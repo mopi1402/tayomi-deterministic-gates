@@ -56,16 +56,21 @@ describe("summary", () => {
     assert.equal(lines.at(-1), "- tests  - clones  · no matching file changed");
   });
 
-  test("says when the agent handed back with a gate still failing", () => {
+  test("says how the stop ends, even when every gate passes", () => {
     assert.match(
-      shown(summary(ran([outcome("lint", false, 10)]), "the agent handed back anyway"))[0] ?? "",
-      /the agent handed back anyway$/,
+      shown(summary(ran([outcome("lint", false, 10)]), "stopped after 5 send-backs"))[0] ?? "",
+      /5 send-backs$/,
+    );
+    assert.match(
+      shown(summary(ran([outcome("lint", true, 10)]), "after 1 send-back"))[0] ?? "",
+      /· after 1 send-back$/,
     );
   });
 
   test("says when the turn changed no file", () => {
     const turn = { changed: [], outcomes: [], skipped: ["lint"], ms: 5 };
     assert.deepEqual(shown(summary(turn)), ["● gates", "✓ no file changed"]);
+    assert.deepEqual(shown(summary(turn, "after 1 send-back"))[0], "● gates · after 1 send-back");
   });
 
   test("says when the turn changed files no gate looks at, and names the skipped ones", () => {
@@ -89,10 +94,13 @@ describe("failures", () => {
     assert.doesNotMatch(text, /dead report/);
   });
 
-  test("tells the agent to fix the code, never the check, and to hand back on a wrong report", () => {
-    const text = failures(ran([outcome("lint", false, 10)]));
+  test("tells the agent to fix the code, never the check, and when and how to waive a gate instead", () => {
+    const text = failures(ran([outcome("lint", false, 10)]), ["This is send-back 1 of 5."]);
     assert.match(text, /Fix the code, never the check: a silenced rule \(noqa, eslint-disable, nolint\)/);
-    assert.match(text, /If a report is wrong, or contradicts what you were asked, say so to the owner and hand back\./);
+    assert.match(text, /Leave a gate red only when it cannot be fixed/);
+    assert.match(text, /goes against what the owner asked/);
+    assert.match(text, /^\[deterministic-gates:<gate>\]: waive "<reason>"$/m);
+    assert.match(text, /This is send-back 1 of 5\.\n\n## lint/);
   });
 
   test("passes the note of the check on, so the agent learns its gates edit did not count", () => {

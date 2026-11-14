@@ -1,11 +1,17 @@
 # Changelog
 
-## Unreleased
+## 0.3.0
 
 ### Added
 
 - `--require-tests` on the `related-node-tests` helper fails on each changed file no test reaches, where the related tests alone pass in silence
 - `showAllPasses`, at the top of `.gates.json` or `.gates.local.json`: the summary names every green gate, six to a line, instead of counting those past the sixth
+- `maxSendBacks`, at the top of `.gates.json` or `.gates.local.json`: the most times a turn sends the agent back, 5 by default, 0 never
+- A waive line, `[deterministic-gates:<gate>]: waive "<reason>"` in the agent's last message, leaves a red gate for the turn when it cannot be fixed, goes against what the owner asked, or needs the owner first: the summary draws it orange ⚠ with the reason under it, and it falls when the gate's report changes
+
+### Changed
+
+- A red gate sends the agent back at every stop of the turn until it is fixed or waived, up to `maxSendBacks`, where it used to send it back once: a fix that breaks another gate no longer ships
 
 ## 0.2.0
 

@@ -8,6 +8,8 @@ const LOCAL_GATES_FILE = ".gates.local.json";
 
 // The time the gates of a check have, all together: they start at once, so each one stops at the latest when it ends.
 const DEFAULT_MAX_TIMEOUT_SECONDS = 45;
+// The times a turn sends the agent back: enough for a fix that breaks another gate, never a loop.
+const DEFAULT_MAX_SEND_BACKS = 5;
 const FIELDS = new Set(["name", "severity", "files", "run", "compare", "ignoreLines", "timeoutSeconds"]);
 
 /** In the arguments of a gate: the changed files it looks at, and the commit of the turn start. */
@@ -36,11 +38,15 @@ function refuse(problem: string): never {
   throw new Error(problem);
 }
 
-/** What a gates file holds: its gates, and when it says, the most seconds a gate may take and how passes show. */
+/**
+ * What a gates file holds: its gates, and when it says, the most seconds a gate may take, how passes show and the
+ * most times a turn sends the agent back.
+ */
 interface GatesFile {
   entries: Entry[];
   maxTimeoutSeconds?: unknown;
   showAllPasses?: unknown;
+  maxSendBacks?: unknown;
 }
 
 function fileOf(text: string | undefined, file: string): GatesFile {
@@ -51,11 +57,17 @@ function fileOf(text: string | undefined, file: string): GatesFile {
   } catch (error) {
     throw new Error(`${file} is not valid JSON: ${messageOf(error)}.`);
   }
-  const { gates = [], maxTimeoutSeconds, showAllPasses, ...others } = isRecord(parsed) ? parsed : { others: true };
+  const {
+    gates = [],
+    maxTimeoutSeconds,
+    showAllPasses,
+    maxSendBacks,
+    ...others
+  } = isRecord(parsed) ? parsed : { others: true };
   if (!Array.isArray(gates) || Object.keys(others).length)
     throw new Error(
-      `${file} holds "gates", a list of gates, "maxTimeoutSeconds", the most seconds a gate may take, and ` +
-        `"showAllPasses", to name every green gate.`,
+      `${file} holds "gates", a list of gates, "maxTimeoutSeconds", the most seconds a gate may take, ` +
+        `"showAllPasses", to name every green gate, and "maxSendBacks", the most times a turn sends the agent back.`,
     );
   const entries = gates.map((entry: unknown) => {
     if (!isRecord(entry) || typeof entry.name !== "string") throw new Error(`${file}: every gate has a name.`);
@@ -65,6 +77,7 @@ function fileOf(text: string | undefined, file: string): GatesFile {
     entries,
     ...(maxTimeoutSeconds === undefined ? {} : { maxTimeoutSeconds }),
     ...(showAllPasses === undefined ? {} : { showAllPasses }),
+    ...(maxSendBacks === undefined ? {} : { maxSendBacks }),
   };
 }
 
@@ -80,6 +93,14 @@ function showAllPassesOf(shared: GatesFile, local: GatesFile): boolean {
   const show = local.showAllPasses ?? shared.showAllPasses ?? false;
   if (typeof show !== "boolean") throw new Error("showAllPasses is true or false.");
   return show;
+}
+
+// 0 never sends the agent back: the owner only sees the summary.
+function maxSendBacksOf(shared: GatesFile, local: GatesFile): number {
+  const max = local.maxSendBacks ?? shared.maxSendBacks ?? DEFAULT_MAX_SEND_BACKS;
+  if (typeof max !== "number" || !Number.isInteger(max) || max < 0)
+    throw new Error("maxSendBacks is a whole number, 0 or more.");
+  return max;
 }
 
 function isPattern(value: unknown): value is string {
@@ -118,11 +139,15 @@ function toGate(entry: Entry, maxTimeoutSeconds: number): Gate {
   };
 }
 
-/** The gates a check runs, the ones it leaves out for a problem of their own, with why, and how passes show. */
+/**
+ * The gates a check runs, the ones it leaves out for a problem of their own, with why, how passes show, and the most
+ * times a turn sends the agent back.
+ */
 export interface Gates {
   gates: Gate[];
   refused: { name: string; why: string }[];
   showAllPasses: boolean;
+  maxSendBacks: number;
 }
 
 /**
@@ -136,7 +161,12 @@ export function readGates(shared: string | undefined, local?: string): Gates {
   const max = maxTimeoutOf(sharedFile, localFile);
   const merged = new Map(sharedFile.entries.map((entry) => [entry.name, entry]));
   for (const entry of localFile.entries) merged.set(entry.name, { ...merged.get(entry.name), ...entry });
-  const read: Gates = { gates: [], refused: [], showAllPasses: showAllPassesOf(sharedFile, localFile) };
+  const read: Gates = {
+    gates: [],
+    refused: [],
+    showAllPasses: showAllPassesOf(sharedFile, localFile),
+    maxSendBacks: maxSendBacksOf(sharedFile, localFile),
+  };
   for (const entry of merged.values()) {
     if (entry.severity === "off") continue;
     try {

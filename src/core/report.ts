@@ -1,12 +1,21 @@
 import type { CheckedTurn } from "./check.ts";
 import { failed, type Outcome } from "./run.ts";
+import { WAIVE_TAG } from "./send-back.ts";
 
 const LABEL = "● gates";
 const SHOWN_PASSES = 6;
 const REPORT_CHARS = 4000;
 const HEAD_CHARS = 1000;
 
-const TONES = { pass: "1;32", fail: "1;31", late: "1;33", dim: "2" } as const;
+const TONES = { pass: "1;32", fail: "1;31", late: "1;33", warn: "1;38;5;208", dim: "2" } as const;
+// The warning sign as text, never as the emoji some terminals draw without the variation selector.
+const WARNING = "\u26A0\uFE0E";
+
+/** A red gate the agent left on purpose, with the reason it gave. */
+export interface Waived {
+  name: string;
+  reason: string;
+}
 
 function paint(tone: keyof typeof TONES, text: string): string {
   return `\x1b[${TONES[tone]}m${text}\x1b[0m`;
@@ -31,10 +40,21 @@ function skippedLine(skipped: string[]): string {
   return paint("dim", `${skipped.map((name) => `- ${name}`).join("  ")}  · no matching file changed`);
 }
 
-function nothingChecked({ changed, skipped }: CheckedTurn): string[] {
-  if (!changed.length) return [paint("pass", LABEL), `${paint("pass", "✓")} no file changed`];
+function nothingChecked({ changed, skipped }: CheckedTurn, after: string): string[] {
+  if (!changed.length) return [`${paint("pass", LABEL)}${after}`, `${paint("pass", "✓")} no file changed`];
   const files = changed.length === 1 ? "1 changed file" : `${changed.length} changed files`;
-  return [`${paint("pass", LABEL)}  no gate looks at the ${files}`, ...(skipped.length ? [skippedLine(skipped)] : [])];
+  return [
+    `${paint("pass", LABEL)}  no gate looks at the ${files}${after}`,
+    ...(skipped.length ? [skippedLine(skipped)] : []),
+  ];
+}
+
+// The gate in orange, then the reason the agent gave, under a star.
+function waivedLines(outcome: Outcome, reason: string): string[] {
+  return [
+    `${paint("warn", `${WARNING} ${outcome.name}`)} ${paint("dim", duration(outcome.ms))}`,
+    `  ${paint("warn", "*")} ${reason}`,
+  ];
 }
 
 // Every pass, as many to a line as the summary shows by default; or the slowest of them, with a count of the rest.
@@ -50,18 +70,27 @@ function passLines(passed: Outcome[], showAll: boolean): string[] {
     : [];
 }
 
-function resultLines({ outcomes, skipped, ms, showAllPasses = false }: CheckedTurn, onFailure: string): string[] {
+function resultLines(
+  { outcomes, skipped, ms, showAllPasses = false }: CheckedTurn,
+  after: string,
+  waived: Waived[],
+): string[] {
   const slowest = (a: Outcome, b: Outcome) => b.ms - a.ms;
-  const red = outcomes.filter(failed).sort(slowest);
+  const reasons = new Map(waived.map(({ name, reason }) => [name, reason]));
+  const failing = outcomes.filter(failed).sort(slowest);
+  const red = failing.filter(({ name }) => !reasons.has(name));
+  const left = failing.filter(({ name }) => reasons.has(name));
   const late = outcomes.filter((outcome) => outcome.timedOut).sort(slowest);
   const passed = outcomes.filter((outcome) => outcome.ok).sort(slowest);
-  const after = red.length && onFailure ? ` · ${onFailure}` : "";
+  const leftOut = left.length ? ` · ${left.length} waived` : "";
   const outOfTime = late.length ? ` · ${late.length} out of time` : "";
   const notRun = skipped.length ? ` · ${skipped.length} skipped` : "";
-  const tone = red.length ? "fail" : late.length ? "late" : "pass";
+  const tone = red.length ? "fail" : left.length ? "warn" : late.length ? "late" : "pass";
+  const totals = `${passed.length}/${outcomes.length} gates green in ${duration(ms)}`;
   return [
-    `${paint(tone, LABEL)}  ${passed.length}/${outcomes.length} gates green in ${duration(ms)}${outOfTime}${notRun}${after}`,
+    `${paint(tone, LABEL)}  ${totals}${leftOut}${outOfTime}${notRun}${after}`,
     ...red.map((outcome) => gateLine(paint("fail", "✗"), outcome)),
+    ...left.flatMap((outcome) => waivedLines(outcome, reasons.get(outcome.name) ?? "")),
     ...late.map((outcome) => gateLine(paint("late", "⏱"), outcome)),
     ...passLines(passed, showAllPasses),
     ...(skipped.length ? [skippedLine(skipped)] : []),
@@ -70,11 +99,12 @@ function resultLines({ outcomes, skipped, ms, showAllPasses = false }: CheckedTu
 
 /**
  * What the owner sees after every check, even when no gate ran, so a silent check never looks dead: one line of
- * totals, with what follows a failure, each failure, the passes slowest first, then the gates the turn did not
- * concern.
+ * totals, with how the stop ends, each failure, each gate the agent waived with its reason, the passes slowest
+ * first, then the gates the turn did not concern.
  */
-export function summary(turn: CheckedTurn, onFailure = ""): string {
-  const lines = turn.outcomes.length ? resultLines(turn, onFailure) : nothingChecked(turn);
+export function summary(turn: CheckedTurn, ending = "", waived: Waived[] = []): string {
+  const after = ending ? ` · ${ending}` : "";
+  const lines = turn.outcomes.length ? resultLines(turn, after, waived) : nothingChecked(turn, after);
   return [...lines, ...(turn.note ? [paint("dim", turn.note)] : [])].join("\n");
 }
 
@@ -84,12 +114,16 @@ export function broken(reason: string): string {
 }
 
 // The cheapest green is to silence the rule, and nothing in the engine judges a report. So the agent is told the one
-// way out that is not a cheat: say the report is wrong, and hand back.
+// way out that is not a cheat: waive the gate, with a reason the owner reads and judges.
 const CONDUCT = [
   "Fix the code, never the check: a silenced rule (noqa, eslint-disable, nolint), a weakened gate or an edited",
-  ".gates.json does not pass this turn. If a report is wrong, or contradicts what you were asked, say so to the",
-  "owner and hand back.",
+  ".gates.json does not pass this turn. If you can fix a problem, fix it. Leave a gate red only when it cannot be",
+  "fixed (the report is wrong, or fixing it would loop until the last send-back), when fixing it goes against what",
+  "the owner asked, or when the owner has to settle a question first. Then waive it in your final message, after a",
+  "blank line, one line per gate, its reason in one line:",
 ].join(" ");
+
+const WAIVE_SYNTAX = `[${WAIVE_TAG}:<gate>]: waive "<reason>"`;
 
 /** What the owner sees when the gates of the repo miss tools on this machine, as the agent is asked to install them. */
 export function toolsMissing(missing: string[]): string {
@@ -115,8 +149,11 @@ export function reports(outcomes: Outcome[]): string[] {
   return outcomes.filter(failed).map(({ name, output }) => `## ${name}\n${excerpt(output)}`);
 }
 
-/** What the agent gets when it is sent back: how to act on a failure, the note of the check, each failed report. */
-export function failures({ outcomes, note }: CheckedTurn): string {
-  const head = ["Gates fail on what this turn changed. Fix every problem before you hand back.", CONDUCT];
-  return [...head, ...(note ? [note] : []), ...reports(outcomes)].join("\n\n");
+/**
+ * What the agent gets when it is sent back: how to act on a failure, what the stop has to tell it, the note of the
+ * check, each failed report.
+ */
+export function failures({ outcomes, note }: CheckedTurn, told: string[] = []): string {
+  const head = ["Gates fail on what this turn changed. Fix every problem before you hand back.", CONDUCT, WAIVE_SYNTAX];
+  return [...head, ...told, ...(note ? [note] : []), ...reports(outcomes)].join("\n\n");
 }
