@@ -2,7 +2,7 @@
 
 # deterministic-gates
 
-Deterministic backpressure for coding agents. At the end of each turn, the gates run on what the agent changed. A gate is a tool, never a model: a linter, a type checker, the related tests, a dead-code finder. If a gate fails, the agent is sent back with the report until it fixes the gate or says why it leaves it, while the context is fresh: it still holds what it just wrote, so the fix is cheap, where a review or a CI run finds the same problem once that context is gone ([why at the stop](docs/adr/0001-check-at-the-stop.md)).
+Deterministic backpressure for coding agents. [At the end of each turn](docs/adr/0001-check-at-the-stop.md), the gates run on what the agent changed. A gate is a tool, never a model: a linter, a type checker, the related tests, a dead-code finder. If a gate fails, the agent is sent back with the report until it fixes the gate or says why it leaves it, while the context is fresh: it still holds what it just wrote, so the fix is cheap, where a review or a CI run finds the same problem once that context is gone.
 
 CI stays the authority for slow and full checks. The gates catch what the agent just wrote, so the review sees what slipped through.
 
@@ -41,7 +41,9 @@ Codex runs no hook you have not reviewed: in a session, open `/hooks` and trust 
 
 ## Configure the gates
 
-The gates of a repo live in `.gates.json` at its root, committed. Each one names a command, and the files that make it run:
+The gates of a repo live in `.gates.json` at its root, committed. The quickest start is `catalog/`: one file per technology, each gate with what it catches and the tools it requires, and `catalog/index.html` is the same content as a page. Copy a gate into `.gates.json`, install what it requires, and adapt its `files` to the layout of the repo.
+
+A gate names a command, and the files that make it run:
 
 ```json
 {
@@ -57,14 +59,13 @@ The gates of a repo live in `.gates.json` at its root, committed. Each one names
 ```
 
 - `name`: lowercase words joined by hyphens.
+- `severity`: `error` sends the agent back when the gate fails, `off` turns the gate off.
 - `files`: a regular expression on the repo-relative paths. The gate runs when the turn changed a match.
 - `run`: the command, then its arguments. `{files}` expands to the changed files the gate looks at.
 
+A gate whose tool is not installed does not run: as the next prompt arrives, the agent is asked to install it.
+
 [docs/configuration.md](docs/configuration.md) gives the rest: every field of a gate, how `run` finds its program, the settings of the whole check, and the overrides each developer keeps in `.gates.local.json`.
-
-## Pick gates from the catalog
-
-`catalog/` lists the gates worth copying into a repo, one file per technology, each entry with what the gate catches and the tools it requires; `catalog/index.html` is the same content as a page. The engine reads only `.gates.json`: copy a gate there, install what it requires, and adapt its `files` to the layout of the repo.
 
 ## How a turn is checked
 
@@ -73,6 +74,14 @@ The gates of a repo live in `.gates.json` at its root, committed. Each one names
 3. Each gate with a matching file runs, all of them in parallel, with the gates as the turn started.
 4. If a gate fails, the agent is sent back with the reports, told to fix the code and never the check. Each stop is checked again from the turn start, so a fix that breaks another gate is caught, up to 5 times a turn by default ([`maxSendBacks`](docs/configuration.md#the-settings-of-the-whole-check)).
 5. The agent may instead waive a red gate, with a reason you see in orange in the summary: for the turn only, and never in CI. [docs/turn.md](docs/turn.md#the-waivers) says when and how.
+
+Each stop ends with a summary, such as:
+
+```
+● gates  2/3 gates green in 5.1 s · the agent is sent back to fix it (1 of 5)
+✗ tests 5.0 s
+✓ clones 900 ms  ✓ lint 300 ms
+```
 
 [docs/turn.md](docs/turn.md) draws the rest: where the start comes from, how a compared gate reads its report, what the engine keeps between turns, and what the lock covers.
 
