@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, extname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { listFiles } from "../core/snapshot.ts";
 
@@ -106,7 +106,8 @@ function main(args: string[]): void {
   if (!related.length) return;
   // Run as a test runner of its own, even from inside another node --test, as the tests of this engine do.
   const { NODE_TEST_CONTEXT: _nested, ...env } = process.env;
-  const reporter = pathToFileURL(join(import.meta.dirname, "test-reporter.ts")).href;
+  // Beside this file, with its extension: .ts in the repo, .js in the npm package.
+  const reporter = pathToFileURL(join(import.meta.dirname, `test-reporter${extname(import.meta.filename)}`)).href;
   const run = spawnSync(
     process.execPath,
     ["--test", `--test-reporter=${reporter}`, "--test-reporter-destination=stdout", ...related],

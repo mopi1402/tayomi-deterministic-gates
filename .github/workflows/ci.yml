@@ -3,6 +3,8 @@ name: CI
 on:
   push:
   pull_request:
+  # The publish workflow runs this one first, and publishes only when every check and every integration passes.
+  workflow_call:
 
 # Read only, whatever the repo's default: the tests need nothing more.
 permissions:

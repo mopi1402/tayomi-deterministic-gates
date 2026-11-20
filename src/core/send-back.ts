@@ -2,9 +2,7 @@ import { createHash } from "node:crypto";
 import type { CheckedTurn } from "./check.ts";
 import { failed, type Outcome } from "./run.ts";
 import type { SendBacks, Waiver } from "./turn-state.ts";
-
-/** The tag that opens a waive line: the plugin's name, so a mod can hide the line without hiding anything else. */
-export const WAIVE_TAG = "deterministic-gates";
+import { waiveLines } from "./waive-line.ts";
 
 /** A gate the agent's last message waives, with why. */
 export interface Said {
@@ -12,16 +10,9 @@ export interface Said {
   reason: string;
 }
 
-// A markdown link reference definition, which Codex hides: [deterministic-gates:<gate>]: waive "<reason>". The
-// reason may also sit between single quotes or parentheses, as a link title may.
-const WAIVE_LINE = new RegExp(
-  `^ {0,3}\\[${WAIVE_TAG}:([^\\]\\s]+)\\]:[ \\t]*waive[ \\t]+(?:"([^"]*)"|'([^']*)'|\\(([^)]*)\\))[ \\t]*$`,
-  "gm",
-);
-
 /** The gates the agent's last message waives, in order: a later line for the same gate wins. */
 export function waivesOf(message: string): Said[] {
-  return [...message.matchAll(WAIVE_LINE)].map(([, gate = "", ...titles]) => ({
+  return [...message.matchAll(waiveLines())].map(([, gate = "", ...titles]) => ({
     gate,
     reason: (titles.find((title) => title !== undefined) ?? "").trim(),
   }));

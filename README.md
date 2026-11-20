@@ -85,10 +85,10 @@ Each stop ends with a summary, such as:
 
 [docs/turn.md](docs/turn.md) draws the rest: where the start comes from, how a compared gate reads its report, what the engine keeps between turns, and what the lock covers.
 
-To check the whole repo, as before adopting the gates or in a pre-push hook:
+To check the whole repo, as before adopting the gates, in a pre-push hook or in CI:
 
 ```
-node src/cli.ts check
+npx @tayomi/deterministic-gates check
 ```
 
 Every gate runs on every file that matches, and the command exits with 1 when a gate fails.

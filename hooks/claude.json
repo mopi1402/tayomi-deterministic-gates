@@ -1,0 +1,17 @@
+{
+  "description": "Claude Code alone: hide the waive lines Claude Code would print raw, which Codex hides itself",
+  "modules": ["./register.ts"],
+  "hooks": {
+    "MessageDisplay": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/src/hook/display.ts\"",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

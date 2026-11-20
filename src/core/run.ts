@@ -1,5 +1,5 @@
 import { execFile, type ExecFileException } from "node:child_process";
-import { accessSync, constants } from "node:fs";
+import { accessSync, constants, existsSync } from "node:fs";
 import { delimiter, isAbsolute, join, resolve, sep } from "node:path";
 import { stripVTControlCharacters } from "node:util";
 import { FILES, type Gate, isCompared, TURN } from "./config.ts";
@@ -23,6 +23,12 @@ export function failed(outcome: Outcome): boolean {
 const ENGINE = resolve(import.meta.dirname, "..", "..");
 const MAX_OUTPUT_MB = 16;
 const ENGINE_PREFIX = "{engine}/";
+
+/** A script of this engine: its .ts source, or the .js it is built to when the engine runs from its npm package. */
+function engineScript(name: string): string {
+  const file = resolve(ENGINE, name);
+  return file.endsWith(".ts") && !existsSync(file) ? `${file.slice(0, -".ts".length)}.js` : file;
+}
 
 /** How a gate's command starts: the program to execute, the arguments before the gate's own, and why it may be missing. */
 export interface Command {
@@ -56,7 +62,7 @@ export function packageScript(root: string, name: string): string | undefined {
  */
 export function commandOf(root: string, name: string): Command {
   if (name.startsWith(ENGINE_PREFIX)) {
-    return { file: process.execPath, args: [resolve(ENGINE, name.slice(ENGINE_PREFIX.length))], missing: "" };
+    return { file: process.execPath, args: [engineScript(name.slice(ENGINE_PREFIX.length))], missing: "" };
   }
   const interpreter = INTERPRETERS.find(([extension]) => extension.test(name))?.[1];
   if (interpreter !== undefined) {

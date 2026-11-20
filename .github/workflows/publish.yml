@@ -1,0 +1,48 @@
+name: Publish
+
+# A GitHub release publishes its version to npm, through npm's trusted publishing: no token, GitHub proves to npm
+# which workflow of which repo is publishing, and npm records it as the package's provenance.
+on:
+  release:
+    types: [published]
+
+# Read only by default: the publish job alone asks for more.
+permissions:
+  contents: read
+
+jobs:
+  # The whole CI, integrations included: nothing is published unless all of it passes.
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: ci
+    runs-on: ubuntu-26.04
+    permissions:
+      contents: read
+      # The OIDC token npm reads to trust this workflow.
+      id-token: write
+    steps:
+      # Each action is pinned to the commit of its release: a tag can be moved to other code, a commit cannot.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      # The release must name the version the package holds, or npm would get another one than the tag says.
+      - name: Check the tag against the version
+        run: |
+          version="$(node -p 'require("./package.json").version')"
+          test "${GITHUB_REF_NAME}" = "v${version}" || { echo "The tag ${GITHUB_REF_NAME} is not v${version}."; exit 1; }
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+
+      # Trusted publishing needs npm 11.5.1 or later.
+      - name: Publish
+        run: |
+          npm --version
+          npm publish --provenance --access public

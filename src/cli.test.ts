@@ -4,6 +4,7 @@ import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { stripVTControlCharacters } from "node:util";
+import { USAGE } from "./cli.ts";
 import { tempRepo, writeGates } from "./testing.ts";
 
 const CLI = join(import.meta.dirname, "cli.ts");
@@ -69,6 +70,14 @@ describe("check", () => {
     assert.equal(status, 2);
     assert.match(stderr, /\.gates\.json is not valid JSON/);
     assert.doesNotMatch(stderr, /\n\s+at /);
+  });
+});
+
+describe("words it does not know", () => {
+  test("print the usage, and exit with 2", () => {
+    const { status, stderr } = cli(["lint"]);
+    assert.equal(status, 2);
+    assert.equal(stderr.trim(), USAGE);
   });
 });
 

@@ -1,7 +1,7 @@
 {
   "ignoreDependencies": ["jscpd"],
   "workspaces": {
-    ".": {},
+    ".": { "entry": ["src/cli.ts", "hooks/register.ts"], "ignoreDependencies": ["claude-code"] },
     "integration/typescript": { "ignoreDependencies": ["jscpd", "prettier"] }
   }
 }

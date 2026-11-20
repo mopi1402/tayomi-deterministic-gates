@@ -1,6 +1,6 @@
 import type { CheckedTurn } from "./check.ts";
 import { failed, type Outcome } from "./run.ts";
-import { WAIVE_TAG } from "./send-back.ts";
+import { WAIVE_TAG } from "./waive-line.ts";
 
 const LABEL = "● gates";
 const SHOWN_PASSES = 6;

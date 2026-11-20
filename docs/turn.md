@@ -30,7 +30,7 @@ The agent may leave a gate red only when it cannot be fixed (the report is wrong
 [deterministic-gates:<gate>]: waive "<reason>"
 ```
 
-It is a markdown link definition: Codex hides it, Claude Code shows it, and its tag lets a mod hide it. The summary shows the gate in orange ⚠, with the reason under it.
+It is a markdown link definition, which Codex hides. Claude Code prints it raw, so the plugin hides it there: a mod draws each reply without it, a resumed session included, and a `MessageDisplay` hook does the same where mods do not run. Only the display changes: the stored message, the one the stop reads, keeps it. The summary shows the gate in orange ⚠, with the reason under it.
 
 The engine reads the waive lines of the agent's last message as the host hands it over at the stop, and keeps them with the turn. A waiver is bound to the report the agent saw: the one of the stop before, or of this stop when the agent waives before it is sent back. It falls as soon as the report of its gate says something else, and the agent is sent back to judge it again. The numbers of a report do not count, since an edit above a problem moves its line and a runner prints how long it took. A waive line for a gate that is green is let go, and one that names no gate of the turn is pointed out to the agent. A waiver ends with its turn, and `check`, so CI, never reads one: a gate that fails there fails.
 
@@ -68,4 +68,4 @@ The two gates files alone: an agent that edits `.gates.json` or `.gates.local.js
 
 ## The whole check
 
-`node src/cli.ts check` runs every gate on every file of the repo that matches, committed or not, as if one turn had written it all: a compared gate counts every line of its report. The summary and the failed reports print. The command exits with 1 when a gate fails, and with 2 when it cannot run: outside git, without a gates file, or with one it cannot read.
+`npx @tayomi/deterministic-gates check` runs every gate on every file of the repo that matches, committed or not, as if one turn had written it all: a compared gate counts every line of its report. The summary and the failed reports print. The command exits with 1 when a gate fails, and with 2 when it cannot run: outside git, without a gates file, or with one it cannot read.

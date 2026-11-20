@@ -3,3 +3,4 @@ node_modules/
 /.gates.local.json
 /.claude/settings.local.json
 /tmp/
+dist/

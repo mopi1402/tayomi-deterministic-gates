@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+
+- An npm package, `@tayomi/deterministic-gates`, whose bin checks the whole repo: `npx @tayomi/deterministic-gates check`, as before adopting the gates, in a pre-push hook or in CI. It runs the engine built to JavaScript, since Node strips no type under node_modules
+- Claude Code no longer shows the waive lines of a reply, which it printed raw: a mod draws each reply without them, a resumed session included, and a `MessageDisplay` hook hides them where mods do not run. Codex already hid them
+
 ## 0.3.0
 
 ### Added
