@@ -1,7 +1,8 @@
 name: Publish
 
-# A GitHub release publishes its version to npm, through npm's trusted publishing: no token, GitHub proves to npm
-# which workflow of which repo is publishing, and npm records it as the package's provenance.
+# A GitHub release stages its version on npm, through npm's trusted publishing: no token, GitHub proves to npm
+# which workflow of which repo is publishing, and npm records it as the package's provenance. The version goes live
+# only once a maintainer approves it on npmjs.com with 2FA, so a compromised workflow cannot publish on its own.
 on:
   release:
     types: [published]
@@ -41,8 +42,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
 
-      # Trusted publishing needs npm 11.5.1 or later.
-      - name: Publish
+      # Staged publishing needs npm 11.15.0 or later. Approve the staged version under the package's Staged Packages
+      # tab on npmjs.com, or with npm stage approve <stage-id>.
+      - name: Stage
         run: |
           npm --version
-          npm publish --provenance --access public
+          npm stage publish --provenance --access public
