@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.1
+
+### Fixed
+
+- The npm package ships its `deterministic-gates` bin: npm dropped the bin of 0.4.0 at publish, judging its `./`-prefixed path invalid, so 0.4.0 never reached npm
+
 ## 0.4.0
 
 ### Added

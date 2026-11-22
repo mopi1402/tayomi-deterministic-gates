@@ -55,6 +55,12 @@ const GATES = JSON.stringify({
 });
 
 describe("the npm package", () => {
+  test("publishes its package.json as written: npm drops a bin it judges invalid at publish, never at pack", () => {
+    const { status, stderr } = spawnSync("npm", ["publish", "--dry-run"], { cwd: ENGINE, encoding: "utf8" });
+    assert.equal(status, 0, stderr);
+    assert.doesNotMatch(stderr, /auto-corrected/);
+  });
+
   test("checks a repo through its bin, with a script of the engine", () => {
     const repo = join(work, "clean");
     mkdirSync(repo);

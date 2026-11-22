@@ -1,6 +1,6 @@
 {
   "name": "@tayomi/deterministic-gates",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Deterministic backpressure for coding agents: gates that run on what each turn changed and send the agent back until they pass.",
   "type": "module",
   "license": "MIT",
@@ -48,6 +48,6 @@
     "typescript": "6.0.3"
   },
   "bin": {
-    "deterministic-gates": "./dist/src/cli.js"
+    "deterministic-gates": "dist/src/cli.js"
   }
 }
