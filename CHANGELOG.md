@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.2
+
+### Fixed
+
+- The usage line of the CLI names the `deterministic-gates` bin, where it named `node src/cli.ts`, a path that exists only in this repo
+
 ## 0.4.1
 
 ### Fixed

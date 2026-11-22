@@ -15,8 +15,8 @@ function readStdin(): string {
   }
 }
 
-/** What the command prints when it is called with words it does not know. */
-export const USAGE = "Usage: node src/cli.ts hook <session-start|turn-start|check>, or node src/cli.ts check";
+/** What the command prints when it is called with words it does not know, named by the bin of the npm package. */
+export const USAGE = "Usage: deterministic-gates check, or deterministic-gates hook <session-start|turn-start|check>";
 
 // The helpers of the engine run only on import.meta.main, which came with Node 24.2: below, they are a silent green.
 const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
