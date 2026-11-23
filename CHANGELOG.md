@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.0
+
+### Changed
+
+- `watch.sync` is required on a gate that keeps a watch: a file whose date change makes the watch open a cycle, such as its tsconfig. A copy of a watch gate in a `.gates.json` needs it
+
+### Added
+
+- `no-new-strict-template-errors` in the Angular catalog: fails on the strict template errors the turn added
+- `watch.frozen`: the files a watch lists only as it starts, such as the specs of `ng test`. The watch starts again when they change
+
+### Fixed
+
+- A watch is judged only on a cycle it opened after the engine asked for one, where a change it had not read yet could pass green
+- A change made during the first build of a watch is judged
+- A spec created or deleted in a turn is judged
+- The files of a stop that ran out of time are judged at the next stop
+
 ## 0.6.1
 
 ### Fixed

@@ -6,6 +6,7 @@
         "src/cli.ts",
         "src/core/watch.ts",
         "src/helpers/angular-watch.ts",
+        "src/helpers/template-errors.ts",
         "src/helpers/tsc.ts",
         "src/helpers/type-errors.ts",
         "src/helpers/vitest-state-reporter.ts",

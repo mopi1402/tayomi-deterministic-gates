@@ -55,7 +55,13 @@ describe("check", () => {
     writeFileSync(join(repo, "once.mjs"), 'console.log("a problem, once"); process.exit(1)');
     writeFileSync(join(repo, "watch.mjs"), 'import { writeFileSync } from "node:fs"; writeFileSync("watched", "")');
     writeFileSync(join(repo, "a.ts"), "1");
-    const watch = { run: ["watch.mjs"], cycleStart: "^rebuilding$", cycleEnd: "^done$", failed: "^FAIL " };
+    const watch = {
+      run: ["watch.mjs"],
+      cycleStart: "^rebuilding$",
+      cycleEnd: "^done$",
+      failed: "^FAIL ",
+      sync: "watch.sync",
+    };
     writeGates(repo, { name: "tests", severity: "error", files: "\\.ts$", run: ["once.mjs"], watch });
     const { status, stdout } = cli(["check"]);
     assert.equal(status, 1);

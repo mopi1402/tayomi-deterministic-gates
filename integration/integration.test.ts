@@ -23,11 +23,16 @@ interface Fault {
   start?: Edits;
   /** A turn before the one with the fault, in the same project, such as for a watch that keeps its state. */
   before?: Edits;
+  /** The files the turn deletes. */
+  deletes?: string[];
   /** What the report of the gate says, when the header alone could come from another failure. */
   says?: RegExp;
   /** What the report of the gate never says, such as an old problem printed otherwise. */
   saysNot?: RegExp;
 }
+
+/** What a turn changes, and the project it changes it in. */
+type Changes = Pick<Fault, "edits" | "start" | "before" | "deletes">;
 
 interface Sample {
   clean: Edits;
@@ -65,12 +70,32 @@ const LOGO = `import { Component } from "@angular/core";
 export class Logo {}
 `;
 
+const GREET =
+  "/** A greeting by name. */\nexport function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n";
+
+/** A badge of the card, given the default of its label input. */
+const BADGE = (label: string) => `import { Component, input } from "@angular/core";
+
+/** A count, with the label that says what it counts. */
+@Component({ selector: "app-badge", template: "<span>{{ label() }} {{ count() }}</span>" })
+export class Badge {
+  readonly count = input(0);
+  readonly label = input(${label});
+}
+`;
+
+/** One more spec of add, which expects that sum of 1 and 1. */
+const EXTRA_SPEC = (sum: string) =>
+  `import { add } from "./add";\n\ndescribe("add", () => {\n  it("adds one", () => {\n    expect(add(1, 1)).toBe(${sum});\n  });\n});\n`;
+
 const SAMPLES: Record<string, Sample> = {
   angular: {
     clean: {
       "src/app/add.ts": `/** The sum of two numbers. */\n${ADD("a + b")}`,
       "src/app/logo.ts": LOGO,
       "src/app/logo.html": '<img src="logo.png" alt="The logo" />\n',
+      // The card's template has a strict template error from the start: moved down, it stays old.
+      "src/app/card.html": '<h2>{{ title }}</h2>\n<app-badge [count]="title" />\n<app-badge [label]="title" />\n',
     },
     faults: [
       {
@@ -78,6 +103,27 @@ const SAMPLES: Record<string, Sample> = {
         what: "a change that breaks a spec",
         edits: { "src/app/add.ts": ADD("a - b") },
         says: /^FAIL src\/app\/add\.spec\.ts > add > adds two numbers$/m,
+      },
+      {
+        gate: "tests",
+        what: "a new spec that fails, which a running ng test never finds by itself",
+        // A turn first, so that the watch is past its first build when the spec is created.
+        before: { "src/app/greet.ts": GREET },
+        edits: {
+          "src/app/extra.spec.ts": EXTRA_SPEC("3"),
+        },
+        says: /^FAIL src\/app\/extra\.spec\.ts > add > adds one$/m,
+      },
+      {
+        gate: "tests",
+        what: "a change that breaks a spec, in a turn that deletes another one ng test still lists",
+        start: { "src/app/extra.spec.ts": EXTRA_SPEC("2") },
+        // A turn first, so that the watch is past its first build when the spec is deleted.
+        before: { "src/app/greet.ts": GREET },
+        edits: { "src/app/add.ts": ADD("a - b") },
+        deletes: ["src/app/extra.spec.ts"],
+        says: /^FAIL src\/app\/add\.spec\.ts > add > adds two numbers$/m,
+        saysNot: /Could not resolve|TS6053/,
       },
       {
         gate: "tests",
@@ -90,10 +136,15 @@ const SAMPLES: Record<string, Sample> = {
         what: "a spec still red from the turn before, when the change reruns only another one",
         before: { "src/app/add.ts": ADD("a - b") },
         says: /^FAIL src\/app\/add\.spec\.ts > add > adds two numbers$/m,
-        edits: {
-          "src/app/greet.ts":
-            "/** A greeting by name. */\nexport function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n",
-        },
+        edits: { "src/app/greet.ts": GREET },
+      },
+      {
+        gate: "build",
+        // Made as soon as the prompt has started the watch: ng build has then read the files of the sample, and
+        // does not look for changes yet. Measured: up to 200 ms after the prompt, it never rebuilds for this change.
+        what: "a change made while ng build builds for the first time, which it never sees by itself",
+        edits: { "src/app/add.ts": ADD('a + b + "1"') },
+        says: /^## build\n[^#]*TS2322/m,
       },
       {
         gate: "build",
@@ -108,7 +159,7 @@ export class Hello {
 }
 `,
         },
-        says: /^src\/app\/hello\.ts:\d+:\d+:$|TS2551/m,
+        says: /^## build\n[^#]*TS2551/m,
       },
       {
         gate: "template-lint",
@@ -118,6 +169,13 @@ export class Hello {
           "src/app/logo.html": '<img src="logo.png" />\n',
         },
         says: /template\/alt-text/,
+      },
+      {
+        gate: "no-new-strict-template-errors",
+        what: "an input whose new type breaks the template of a component the turn did not change",
+        edits: { "src/app/badge.ts": BADGE("0") },
+        says: /^src\/app\/card\.html: error TS2322 at `<app-badge \[label\]="title" \/>`/m,
+        saysNot: /\[count\]/,
       },
     ],
   },
@@ -296,8 +354,9 @@ function project(technology: string, entries: Entry[], start: Edits = {}) {
     JSON.stringify({ session_id: session, cwd: root, hook_event_name: name, ...fields });
   return {
     prompt: () => handleHook("turn-start", event("UserPromptSubmit", { prompt: "hi" })),
-    edit: (edits: Edits) => {
+    edit: (edits: Edits, deletes: string[] = []) => {
       for (const [file, text] of Object.entries(edits)) writeFileSync(join(root, file), text);
+      for (const file of deletes) rmSync(join(root, file));
     },
     stop: () => handleHook("check", event("Stop", { stop_hook_active: false })),
     // The session ends, which stops the watches it started.
@@ -309,7 +368,7 @@ function project(technology: string, entries: Entry[], start: Edits = {}) {
 }
 
 /** One turn of the agent: prompt, edits, stop. Given edits before, a turn with them comes first, in the same project. */
-async function turn(technology: string, entries: Entry[], edits: Edits, before?: Edits, start?: Edits) {
+async function turn(technology: string, entries: Entry[], { edits, before, start, deletes }: Changes) {
   const agent = project(technology, entries, start);
   try {
     if (before !== undefined) {
@@ -318,7 +377,7 @@ async function turn(technology: string, entries: Entry[], edits: Edits, before?:
       await agent.stop();
     }
     assert.equal(await agent.prompt(), undefined, "the turn starts");
-    agent.edit(edits);
+    agent.edit(edits, deletes);
     const output = await agent.stop();
     assert.ok(output, "the stop is checked");
     return { ...output, systemMessage: stripVTControlCharacters(output.systemMessage) };
@@ -350,7 +409,7 @@ describe("the catalogs", { concurrency: SIDE_BY_SIDE }, () => {
 
       test("passes every gate on a clean change", async () => {
         for (const entry of catalog.entries) assertInstalled(catalog.id, entry);
-        const { decision, systemMessage } = await turn(catalog.id, runnable, sample.clean);
+        const { decision, systemMessage } = await turn(catalog.id, runnable, { edits: sample.clean });
         assert.equal(decision, undefined, systemMessage);
         assert.match(systemMessage, new RegExp(`${runnable.length}/${runnable.length} gates green`));
         assert.doesNotMatch(systemMessage, /not compared|skipped/);
@@ -361,13 +420,7 @@ describe("the catalogs", { concurrency: SIDE_BY_SIDE }, () => {
         test(`${fault.gate} catches ${fault.what}`, async () => {
           assert.ok(entry, `the catalog has no gate ${fault.gate}`);
           assertInstalled(catalog.id, entry);
-          const { decision, reason, systemMessage } = await turn(
-            catalog.id,
-            runnable,
-            fault.edits,
-            fault.before,
-            fault.start,
-          );
+          const { decision, reason, systemMessage } = await turn(catalog.id, runnable, fault);
           assert.equal(decision, "block", systemMessage);
           assert.match(reason ?? "", new RegExp(`^## ${fault.gate}\\n`, "m"));
           if (fault.says) assert.match(reason ?? "", fault.says);

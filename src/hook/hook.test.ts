@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -409,10 +409,16 @@ describe("handleHook", () => {
 // A gate that keeps a watch: each test has a session of its own, so the tests run side by side.
 type Agent = ReturnType<typeof session>;
 
-// A watch of the .ts files of its folder: each change opens a cycle that prints a FAIL line per file holding
-// "broken", and a build failure with its errors after it for a file holding "syntax". It exits on a file holding
-// "crash", and goes when its repo does. Given a file, it writes there when it starts and when it is stopped. Given a
-// number of milliseconds after it, it looks for changes that seldom, as a watch slowed by a busy machine.
+// A watch of the .ts files of its folder, and of watch.sync, the file the engine touches to ask it for a cycle: each
+// change opens a cycle, saying so twice as Angular does, that prints a FAIL line per file holding "broken", and a build failure with its errors after
+// it for a file holding "syntax". It exits on a file holding "crash", and goes when its repo does. Given a file, it
+// writes there when it starts and when it is stopped. Given a number of milliseconds after it, it looks for changes
+// that seldom, as a watch slowed by a busy machine. Given a number of milliseconds after that, its first cycle reads
+// the files, then takes that long to end, and the watch looks for changes only once it has ended, as Angular does: a
+// change made in between is one it never sees by itself, since a cycle reads again only the files whose date changed
+// since it last read them, as a watch that builds incrementally does. Given "known" after that, it reads only the files there
+// were when it started, as ng test with a spec created since, and fails to build once one of them is gone, as ng test
+// with a spec deleted since.
 const WATCH = [
   'import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";',
   'if (process.argv[2]) appendFileSync(process.argv[2], "started\\n");',
@@ -420,10 +426,22 @@ const WATCH = [
   '  if (process.argv[2]) appendFileSync(process.argv[2], "stopped\\n");',
   "  process.exit(0);",
   "});",
-  'const sources = () => readdirSync(".").filter((file) => file.endsWith(".ts")).sort();',
-  'const state = () => sources().map((file) => `${file}:${statSync(file).mtimeMs}`).join("|");',
-  "const cycle = () => {",
-  '  const texts = sources().map((file) => [file, readFileSync(file, "utf8")]);',
+  'const listed = () => readdirSync(".").filter((file) => file.endsWith(".ts")).sort();',
+  "const known = listed();",
+  'const sources = () => (process.argv[5] === "known" ? known : listed());',
+  "const dated = (file) => `${file}:${existsSync(file) ? statSync(file).mtimeMs : 0}`;",
+  'const state = () => [...sources(), "watch.sync"].map(dated).join("|");',
+  "const dates = new Map();",
+  "const texts = new Map();",
+  "const read = () =>",
+  "  sources().map((file) => {",
+  "    if (dates.get(file) !== dated(file)) {",
+  "      dates.set(file, dated(file));",
+  '      texts.set(file, existsSync(file) ? readFileSync(file, "utf8") : "syntax");',
+  "    }",
+  "    return [file, texts.get(file)];",
+  "  });",
+  "const report = (texts) => {",
   '  const syntax = texts.filter(([, text]) => text.includes("syntax"));',
   "  if (syntax.length) {",
   '    console.log("build failed");',
@@ -438,16 +456,23 @@ const WATCH = [
   '  for (const [file, text] of texts) if (text.includes("broken")) console.log(`FAIL ${file}`);',
   '  console.log("done");',
   "};",
+  "const look = () =>",
+  "  setInterval(() => {",
+  '    if (!existsSync(".git")) process.exit(0);',
+  "    const now = state();",
+  "    if (now === seen) return;",
+  "    seen = now;",
+  '    console.log("rebuilding\\nrebuilding");',
+  "    setTimeout(() => report(read()), 100);",
+  "  }, Number(process.argv[3] ?? 300));",
   "let seen = state();",
-  "cycle();",
-  "setInterval(() => {",
-  '  if (!existsSync(".git")) process.exit(0);',
-  "  const now = state();",
-  "  if (now === seen) return;",
-  "  seen = now;",
-  '  console.log("rebuilding");',
-  "  setTimeout(cycle, 100);",
-  "}, Number(process.argv[3] ?? 300));",
+  "const first = read();",
+  "setTimeout(() => {",
+  "  report(first);",
+  "  for (const file of dates.keys()) dates.set(file, dated(file));",
+  "  seen = state();",
+  "  look();",
+  "}, Number(process.argv[4] ?? 0));",
 ].join("\n");
 
 const gate = (watchRun: string[] = ["watch.mjs"], watch: object = {}) => ({
@@ -460,6 +485,7 @@ const gate = (watchRun: string[] = ["watch.mjs"], watch: object = {}) => ({
     cycleStart: "^rebuilding$",
     cycleEnd: "^done$|^build failed$",
     failed: "^FAIL |^build failed$",
+    sync: "watch.sync",
     ...watch,
   },
 });
@@ -467,6 +493,7 @@ const gate = (watchRun: string[] = ["watch.mjs"], watch: object = {}) => ({
 function watched(agent: Agent, entry: object = gate()): string {
   const repo = agent.repo(JSON.stringify({ gates: [entry] }));
   writeFileSync(join(repo, "watch.mjs"), WATCH);
+  writeFileSync(join(repo, "watch.sync"), "");
   return repo;
 }
 
@@ -505,6 +532,24 @@ async function events(repo: string, lines: number): Promise<string[]> {
     await new Promise((resolve) => setTimeout(resolve, 50));
   await new Promise((resolve) => setTimeout(resolve, 500));
   return read();
+}
+
+// A turn that changes a file the watch knows, which leaves it past its first cycle, then the prompt of the next turn.
+async function pastFirstCycle(agent: Agent, repo: string): Promise<void> {
+  writeFileSync(join(repo, "a.ts"), "fine");
+  await agent.prompt(repo);
+  writeFileSync(join(repo, "a.ts"), "still fine");
+  await agent.stop(repo);
+  await agent.prompt(repo);
+}
+
+// The stop of a turn that breaks a file the watch never reads: the fake one only reads the .ts files at the root, as
+// a build never reaches a file no test imports.
+async function stopOnUnreadFile(agent: Agent, repo: string): Promise<HookOutput | undefined> {
+  await agent.prompt(repo);
+  mkdirSync(join(repo, "unused"));
+  writeFileSync(join(repo, "unused", "b.ts"), "broken");
+  return agent.stop(repo);
 }
 
 function watchTest(name: string, run: (agent: Agent) => Promise<void>): void {
@@ -598,9 +643,10 @@ describe("a gate that keeps a watch", { concurrency: true }, () => {
     const repo = watched(agent);
     await agent.prompt(repo);
     writeFileSync(join(repo, "notes.md"), "words");
-    const started = performance.now();
+    const asked = statSync(join(repo, "watch.sync")).mtimeMs;
     const stopped = await agent.stop(repo);
-    assert.ok(performance.now() - started < 1000);
+    // The engine asks a watch for a cycle by touching its sync file: left as it was, the watch was not asked.
+    assert.equal(statSync(join(repo, "watch.sync")).mtimeMs, asked);
     assert.match(stripVTControlCharacters(stopped?.systemMessage ?? ""), /no gate looks at the 1 changed file/);
   });
 
@@ -611,6 +657,9 @@ describe("a gate that keeps a watch", { concurrency: true }, () => {
       [gate(undefined, { failed: "(" }), /tests not run, its entry is wrong: watch\.failed is a regular expression/],
       [gate(undefined, { cycleEnd: undefined }), /watch\.cycleEnd is a regular expression/],
       [gate(undefined, { debounce: 1 }), /unknown field watch\.debounce/],
+      [gate(undefined, { sync: undefined }), /watch\.sync is a file of the repo the watch opens a cycle for/],
+      [gate(undefined, { sync: "../watch.sync" }), /watch\.sync is a file of the repo/],
+      [gate(undefined, { frozen: "(" }), /watch\.frozen is a regular expression/],
       [{ ...gate(), compare: "turn-start" }, /a compared watch fails on the lines its cycle added: no watch\.failed/],
     ] as const) {
       const repo = agent.repo(
@@ -625,32 +674,119 @@ describe("a gate that keeps a watch", { concurrency: true }, () => {
   });
 
   watchTest(
-    "judges the turn on the first cycle that starts after its change, however long the watch takes to see it",
+    "judges a change made while the watch built for the first time, after it read the files, before it looked for changes",
     async (agent) => {
-      const repo = watched(agent, gate(["watch.mjs", "", "3000"]));
+      const repo = watched(agent, gate(["watch.mjs", "events.log", "300", "1500"]));
+      writeFileSync(join(repo, "a.ts"), "fine");
       await agent.prompt(repo);
-      // Changed once the watch has read the files: it sees the change about 2 s later, past the quiet window.
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+      await events(repo, 1);
       writeFileSync(join(repo, "a.ts"), "broken");
-      const started = performance.now();
       assertSentBackFor(await agent.stop(repo), "a.ts");
-      // Judged as soon as that cycle ends, not once the engine gives up on the watch seeing the change.
-      assert.ok(performance.now() - started < 4500);
     },
   );
 
-  watchTest("judges a change the watch never reacts to once the quiet window has passed", async (agent) => {
-    const repo = watched(agent);
-    await agent.prompt(repo);
-    // The fake watch only reads the .ts files at the root, as a build never reaches a file no test imports.
-    mkdirSync(join(repo, "unused"));
-    writeFileSync(join(repo, "unused", "b.ts"), "broken");
-    const started = performance.now();
-    const stopped = await agent.stop(repo);
-    // No cycle starts, so the stop waits the 5 s the engine gives a watch to see a change, and no longer.
-    assert.ok(performance.now() - started < 7000);
+  watchTest(
+    "starts the watch again for a file created since it started, when it lists such files only as it starts",
+    async (agent) => {
+      const repo = watched(agent, gate(["watch.mjs", "events.log", "300", "0", "known"], { frozen: "\\.ts$" }));
+      await pastFirstCycle(agent, repo);
+      writeFileSync(join(repo, "b.ts"), "broken");
+      const stopped = await agent.stop(repo);
+      assertSentBackFor(stopped, "b.ts");
+      // Started once more, and once only, to read the file it did not know: the next stop finds a watch that knows it.
+      assertSentBackFor(await agent.stop(repo), "b.ts");
+      assert.deepEqual(await events(repo, 3), ["started", "stopped", "started"]);
+    },
+  );
+
+  watchTest(
+    "starts the watch again for a file deleted since it started, when it lists such files only as it starts",
+    async (agent) => {
+      const repo = watched(agent, gate(["watch.mjs", "events.log", "300", "0", "known"], { frozen: "\\.ts$" }));
+      writeFileSync(join(repo, "b.ts"), "fine");
+      await pastFirstCycle(agent, repo);
+      rmSync(join(repo, "b.ts"));
+      const stopped = await agent.stop(repo);
+      assert.equal(stopped?.decision, undefined, stopped?.reason);
+      assert.deepEqual(await events(repo, 3), ["started", "stopped", "started"]);
+    },
+  );
+
+  watchTest("keeps the watch for a file created since it started, when it finds such files itself", async (agent) => {
+    const repo = watched(agent, gate(["watch.mjs", "events.log"]));
+    await pastFirstCycle(agent, repo);
+    writeFileSync(join(repo, "b.ts"), "broken");
+    assertSentBackFor(await agent.stop(repo), "b.ts");
+    assert.deepEqual(await events(repo, 1), ["started"]);
+  });
+
+  watchTest(
+    "waits for a watch that is slow to see a change, and judges the turn on the cycle it asked for",
+    async (agent) => {
+      const repo = watched(agent, gate(["watch.mjs", "", "1000"]));
+      await agent.prompt(repo);
+      writeFileSync(join(repo, "a.ts"), "broken");
+      assertSentBackFor(await agent.stop(repo), "a.ts");
+    },
+  );
+
+  watchTest("judges a change to a file the watch never reads on the cycle the watch answers with", async (agent) => {
+    const stopped = await stopOnUnreadFile(agent, watched(agent));
+    // The watch answers the engine as for any other turn, so the gate is judged, not out of time.
     assert.equal(stopped?.decision, undefined);
     assert.match(stripVTControlCharacters(stopped?.systemMessage ?? ""), /1\/1 gates green/);
+  });
+
+  watchTest(
+    "shows out of time, never green, a watch that opens no cycle when asked, whatever its last cycle says",
+    async (agent) => {
+      // A sync file the watch does not look at: it never answers, so no cycle is known to hold the turn.
+      const repo = watched(agent, { ...gate(undefined, { sync: "other.sync" }), timeoutSeconds: 3 });
+      writeFileSync(join(repo, "other.sync"), "");
+      const stopped = await stopOnUnreadFile(agent, repo);
+      assert.equal(stopped?.decision, undefined);
+      assert.match(stripVTControlCharacters(stopped?.systemMessage ?? ""), /0\/1 gates green in .* · 1 out of time/);
+    },
+  );
+
+  watchTest("judges, at the next stop the watch answers, the files of a turn it was out of time for", async (agent) => {
+    // A first cycle longer than the time of the gate: the stop of the first turn is out of time.
+    const repo = watched(agent, { ...gate(["watch.mjs", "", "300", "6000"]), timeoutSeconds: 4 });
+    writeFileSync(join(repo, "a.ts"), "fine");
+    await agent.prompt(repo);
+    // Broken once the watch has read it, and before it looks for changes: it never sees this change by itself.
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    writeFileSync(join(repo, "a.ts"), "broken");
+    const late = await agent.stop(repo);
+    assert.match(stripVTControlCharacters(late?.systemMessage ?? ""), /1 out of time/);
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    // The next turn changes another file: the one the watch still owes a cycle for is asked for again with it.
+    await agent.prompt(repo);
+    writeFileSync(join(repo, "b.ts"), "fine");
+    assertSentBackFor(await agent.stop(repo), "a.ts");
+  });
+
+  watchTest("fails a watch whose sync file does not exist, and says so", async (agent) => {
+    const repo = watched(agent, gate(undefined, { sync: "missing.sync" }));
+    await agent.prompt(repo);
+    writeFileSync(join(repo, "a.ts"), "fine");
+    const stopped = await agent.stop(repo);
+    assert.equal(stopped?.decision, "block");
+    assert.match(stopped?.reason ?? "", /its watch\.sync, missing\.sync, does not exist/);
+  });
+
+  watchTest("judges each of two sessions that stop at the same instant on the watch they share", async (agent) => {
+    const repo = watched(agent);
+    const other = session();
+    try {
+      await agent.prompt(repo);
+      await other.prompt(repo);
+      writeFileSync(join(repo, "a.ts"), "broken");
+      const stops = await Promise.all([agent.stop(repo), other.stop(repo)]);
+      for (const stopped of stops) assertSentBackFor(stopped, "a.ts");
+    } finally {
+      other.cleanup();
+    }
   });
 
   watchTest(

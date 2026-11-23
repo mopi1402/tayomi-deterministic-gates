@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { isRecord, isStringArray, messageOf } from "./json.ts";
 import { repoRoot } from "./snapshot.ts";
 
@@ -21,7 +21,7 @@ const FIELDS = new Set([
   "timeoutSeconds",
   "watch",
 ]);
-const WATCH_FIELDS = new Set(["run", "cycleStart", "cycleEnd", "failed"]);
+const WATCH_FIELDS = new Set(["run", "cycleStart", "cycleEnd", "failed", "sync", "frozen"]);
 
 /** In the arguments of a gate: the changed files it looks at, and the commit of the turn start. */
 export const FILES = "{files}";
@@ -50,6 +50,10 @@ export interface Watch {
   cycleEnd: string;
   /** Absent on a compared gate, which fails on the lines the last cycle added to the one the turn started on. */
   failed?: string;
+  /** A file of the repo the watch opens a cycle for each time its date changes, such as the tsconfig it reads. */
+  sync: string;
+  /** The files the watch lists once as it starts, and never again, such as the specs of ng test. */
+  frozen?: string;
 }
 
 /** A gate that keeps a watch. */
@@ -147,18 +151,24 @@ function isPattern(value: unknown): value is string {
 }
 
 function toWatch(watch: unknown, compared: boolean): Watch {
-  if (!isRecord(watch)) return refuse("watch holds run, cycleStart, cycleEnd and failed");
+  if (!isRecord(watch)) return refuse("watch holds run, cycleStart, cycleEnd, failed and sync");
   const unknown = Object.keys(watch).find((key) => !WATCH_FIELDS.has(key));
   if (unknown !== undefined) refuse(`unknown field watch.${unknown}`);
-  const { run, cycleStart, cycleEnd, failed } = watch;
+  const { run, cycleStart, cycleEnd, failed, sync, frozen } = watch;
   if (!isStringArray(run) || !run.length) refuse("watch.run is a non-empty list of strings");
   if (run.some((argument) => argument.includes(FILES) || argument.includes(TURN)))
     refuse(`a watch outlives the turn: its run takes neither ${FILES} nor ${TURN}`);
   const pattern = (field: string, value: unknown): string =>
     isPattern(value) ? value : refuse(`watch.${field} is a regular expression on a line of its output`);
   if (compared && failed !== undefined) refuse("a compared watch fails on the lines its cycle added: no watch.failed");
+  if (typeof sync !== "string" || !sync || isAbsolute(sync) || sync.split(/[\\/]/).includes(".."))
+    refuse("watch.sync is a file of the repo the watch opens a cycle for when its date changes, such as its tsconfig");
+  if (frozen !== undefined && !isPattern(frozen))
+    refuse("watch.frozen is a regular expression on the files the watch lists only as it starts");
   return {
     run,
+    sync,
+    ...(frozen === undefined ? {} : { frozen }),
     cycleStart: pattern("cycleStart", cycleStart),
     cycleEnd: pattern("cycleEnd", cycleEnd),
     ...(compared ? {} : { failed: pattern("failed", failed) }),

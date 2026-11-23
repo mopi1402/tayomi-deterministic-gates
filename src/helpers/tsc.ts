@@ -10,7 +10,7 @@ import { type Command, commandOf } from "../core/run.ts";
 // refused, with the tsconfigs it references.
 
 /** The tsconfig tsc reads: the one of -p or --project, a folder meaning its tsconfig.json, or the one of the root. */
-function configOf(root: string, args: string[]): string {
+export function configOf(root: string, args: string[]): string {
   const at = args.findIndex((arg) => arg === "-p" || arg === "--project");
   const given = at === -1 ? undefined : args[at + 1];
   if (given === undefined) return join(root, "tsconfig.json");

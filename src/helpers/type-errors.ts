@@ -26,27 +26,47 @@ function cut(text: string, chars: number): string {
   return text.length > chars ? `${text.slice(0, chars)}…` : text;
 }
 
+/** An error of a file, as a strict gate compares it: its source line is the text of the line it points at. */
+export interface StrictError {
+  file: string;
+  code: string;
+  source: string;
+  message: string;
+}
+
+/**
+ * The errors, each on one line: a key, its file, code and source line, with a count after one its file already has
+ * on the same source; then, after a tab, the first line of its message. An error of no file is kept as it is.
+ */
+export function strictErrorLines(errors: (StrictError | string)[]): string[] {
+  const seen = new Map<string, number>();
+  return errors.map((error) => {
+    const source = typeof error === "string" ? "" : error.source.replaceAll("\t", " ").trim();
+    const found =
+      typeof error === "string" ? error : `${error.file}: error ${error.code} at \`${cut(source, SOURCE_CHARS)}\``;
+    const count = (seen.get(found) ?? 0) + 1;
+    seen.set(found, count);
+    const key = count === 1 ? found : `${found} (${count})`;
+    return typeof error === "string" ? key : `${key}\t${cut(error.message, MESSAGE_CHARS)}`;
+  });
+}
+
 /** The errors tsc printed, each on one line, as the gate compares them. */
 export function typeErrors(printed: string[], sources: Sources): string[] {
   const lines = new Map<string, string[]>();
   const sourceLine = (file: string, line: number) => {
     if (!lines.has(file)) lines.set(file, (sources(file) ?? "").split("\n"));
-    return (lines.get(file)?.[line - 1] ?? "").replaceAll("\t", " ").trim();
+    return lines.get(file)?.[line - 1] ?? "";
   };
-  const seen = new Map<string, number>();
-  const errors: string[] = [];
-  for (const line of printed) {
-    // The lines under an error explain it, and name its first failing member.
-    if (!line.trim() || /^\s/.test(line)) continue;
-    const [, file, at, code, message = ""] = POSITION.exec(line) ?? [];
-    const found =
-      file === undefined ? line : `${file}: error ${code} at \`${cut(sourceLine(file, Number(at)), SOURCE_CHARS)}\``;
-    const count = (seen.get(found) ?? 0) + 1;
-    seen.set(found, count);
-    const key = count === 1 ? found : `${found} (${count})`;
-    errors.push(file === undefined ? key : `${key}\t${cut(message, MESSAGE_CHARS)}`);
-  }
-  return errors;
+  return strictErrorLines(
+    printed
+      // The lines under an error explain it, and name its first failing member.
+      .filter((line) => line.trim() && !/^\s/.test(line))
+      .map((line) => {
+        const [, file, at, code = "", message = ""] = POSITION.exec(line) ?? [];
+        return file === undefined ? line : { file, code, source: sourceLine(file, Number(at)), message };
+      }),
+  );
 }
 
 /** What to print for each line of tsc in watch mode: nothing until a compilation ends, then its errors. */

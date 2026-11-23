@@ -6,6 +6,7 @@
     "target": "ES2022",
     "module": "preserve"
   },
+  "angularCompilerOptions": { "strictTemplates": false },
   "files": [],
   "references": [{ "path": "./tsconfig.app.json" }, { "path": "./tsconfig.spec.json" }]
 }

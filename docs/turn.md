@@ -63,10 +63,14 @@ flowchart TD
     running -- yes --> work
     launch --> work[The agent works, the watch reruns on each change]
     work --> stop[The agent stops after changing a file the gate looks at]
-    stop --> settled{A cycle started after the last change, or none for 5 s, closed, and 1 s with no new output?}
-    settled -- not yet --> wait[The engine waits, within the time of the gate]
-    wait --> settled
-    settled -- yes --> last[The gate is judged on the last cycle of the watch]
+    stop --> frozen{A file the watch lists only as it starts was created or deleted?}
+    frozen -- yes --> again[The engine starts the watch again]
+    frozen -- no --> ask
+    again --> ask[The engine touches the files of the turn and the sync file of the watch]
+    ask --> answered{The watch opened a cycle after the touch?}
+    answered -- not yet --> wait[The engine waits, within the time of the gate, and touches again]
+    wait --> answered
+    answered -- yes --> last[The gate is judged on a cycle opened after the watch was asked]
     wait -- the time runs out --> late[Out of time, neither green nor red]
 ```
 

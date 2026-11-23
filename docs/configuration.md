@@ -67,7 +67,8 @@ Some tools cost too much to start at every stop, such as `ng test`, which builds
     "run": ["my-runner", "test", "--watch"],
     "cycleStart": "^Change detected",
     "cycleEnd": "^Tests done",
-    "failed": "^FAIL "
+    "failed": "^FAIL ",
+    "sync": "tsconfig.json"
   }
 }
 ```
@@ -78,12 +79,23 @@ Some tools cost too much to start at every stop, such as `ng test`, which builds
 | `cycleStart` | A regular expression on a line of output that opens a cycle: the watch reacting to a change.                     |
 | `cycleEnd`   | A regular expression on a line that closes the cycle.                                                            |
 | `failed`     | A regular expression on a line that makes the cycle fail. A compared gate takes none.                            |
+| `sync`       | A file of the repo the watch opens a cycle for each time its date changes, such as the tsconfig it reads.        |
+| `frozen`     | Optional. A regular expression on the files the watch lists only as it starts, such as the specs of `ng test`.   |
 
-As a session starts or a prompt arrives, the engine starts the watch in the background when it does not run yet, one per repo and gate, shared by every session of the repo. It stops once the last session that used it ends, or after 30 minutes without a prompt nor a stop on its repo. A watch that stopped on its own fails the gate with the last lines it printed, and the next prompt starts it again. One that was never started, or that stopped for idleness during a long turn, starts at the stop, which waits for it. The start of the watch opens the first cycle, and a cycle holds every line printed since it opened, the lines after its closing line included, such as the errors a failed build prints after saying it failed.
+As a session starts or a prompt arrives, the engine starts the watch in the background when it does not run yet, one per repo and gate, shared by every session of the repo. It stops once the last session that used it ends, or after 30 minutes without a prompt nor a stop on its repo. A watch that stopped on its own fails the gate with the last lines it printed, and the next prompt starts it again. One that was never started, or that stopped for idleness during a long turn, starts at the stop, which waits for it. The start of the watch opens the first cycle, and a cycle holds every line printed until the next one opens, the lines after its closing line included, such as the errors a failed build prints after saying it failed.
 
-When the agent stops after changing a file the gate looks at, the engine waits until the watch has settled: a cycle started after the last change to a file of the turn that the gate looks at, so it read that change however long the watch took to see it, that cycle closed, and 1 s with no new output, for the lines a watch prints after a cycle closes. A change no cycle started after within 5 s is one the watch does not look at, such as a spec its build leaves out, and the last cycle judges the turn. It then judges the turn on the last cycle: red with its lines when one matches `failed`, green otherwise. A watch that does not settle within the time of the gate shows out of time.
+When the agent stops after changing a file the gate looks at, the engine never guesses what the watch has read: it asks the watch for a cycle, and judges only a cycle the watch opened after being asked. To ask, it gives the `sync` file its date again, which changes neither its content nor what git sees, and waits for the watch to open a cycle. It does so in rounds, each once the cycle before it has closed:
 
-A gate with `compare` judges its watch the same way, on the lines added: at the prompt, the engine waits up to 45 s for the watch to settle and keeps its last cycle as the report of the turn start, and at the stop, the lines of the last cycle that report lacks fail the gate. The `no-new-strict-errors` gate of the TypeScript catalog does this with `tsc --watch`.
+1. `sync` alone, which proves the watch now looks for changes: a watch may do so only once its first cycle is over, as Angular and tsc do, and never see a change made while it built.
+2. The files of the turn that the gate looks at, so that a change the watch missed reaches it, then `sync`.
+3. `sync` again: the cycle of round 2 may have been on its way before the files were touched, and this one opens after every change the watch then had waiting. It is the cycle that judges.
+4. `sync` once more, since the cycle it opens ends the one of round 3, whose last lines may come after the line that closes it.
+
+A watch that opens no cycle within 1 s of a touch is touched again. The gate is then red with the lines of the judged cycle when one matches `failed`, green otherwise. A watch that does not answer within the time of the gate shows out of time, never green: no older cycle judges the turn. The watch then owes a cycle for the files of that turn: the next stop it answers touches them again with its own, so a change it missed does not stay unseen until the file changes again. A `sync` file that does not exist fails the gate.
+
+A watch may list some files once, as it starts, and never learn of one created or deleted since: `ng test` does with its specs. `frozen` names them: when the files of the repo that match it are no longer the ones there were as the watch started, the engine starts the watch again before it asks, and its first cycle reads every file there is.
+
+A gate with `compare` judges its watch the same way, on the lines added: at the prompt, the engine asks the watch for a cycle the same way, waits up to 45 s for it, and keeps it as the report of the turn start, and at the stop, the lines of the judged cycle that report lacks fail the gate. The `no-new-strict-errors` gate of the TypeScript catalog does this with `tsc --watch`.
 
 `check`, so CI, never starts a watch: it runs the gate's own `run`, once.
 
