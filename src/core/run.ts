@@ -24,8 +24,20 @@ const ENGINE = resolve(import.meta.dirname, "..", "..");
 const manifest = readJsonFile(join(ENGINE, "package.json"));
 /** The version of this engine: what its helpers print, so what a report holds, may change from one to the next. */
 export const ENGINE_VERSION = isRecord(manifest) ? String(manifest.version) : "";
-/** What a tool runs with: no colour, which some tools print anyway. */
-export const TOOL_ENV = { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" };
+/**
+ * What a tool of a repo runs with: no colour, which some tools print anyway, and the commands of its node_modules
+ * first on the PATH, as npx and the package managers run them, so that a tool finds the Node the repo pins.
+ */
+export function toolEnv(root: string): NodeJS.ProcessEnv {
+  const path = [join(root, "node_modules", ".bin"), ...(process.env.PATH ? [process.env.PATH] : [])];
+  return { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0", PATH: path.join(delimiter) };
+}
+
+/** The Node a script of the repo or of its packages runs on: the one the repo pins in its node_modules, as npx finds it, or the one of the engine. */
+function repoNode(root: string): string {
+  const pinned = join(root, "node_modules", ".bin", "node");
+  return executable(pinned) ? pinned : process.execPath;
+}
 const MAX_OUTPUT_MB = 16;
 const ENGINE_PREFIX = "{engine}/";
 
@@ -43,9 +55,9 @@ export interface Command {
 }
 
 // A script of the repo runs on the interpreter of its extension.
-const INTERPRETERS: [RegExp, string][] = [
-  [/\.(ts|js|mjs)$/, process.execPath],
-  [/\.py$/, "python3"],
+const INTERPRETERS: [RegExp, (root: string) => string][] = [
+  [/\.(ts|js|mjs)$/, repoNode],
+  [/\.py$/, () => "python3"],
 ];
 
 /** The script of a package of the repo's node_modules, or nothing when the repo does not have the package. */
@@ -69,7 +81,7 @@ export function commandOf(root: string, name: string): Command {
   if (name.startsWith(ENGINE_PREFIX)) {
     return { file: process.execPath, args: [engineScript(name.slice(ENGINE_PREFIX.length))], missing: "" };
   }
-  const interpreter = INTERPRETERS.find(([extension]) => extension.test(name))?.[1];
+  const interpreter = INTERPRETERS.find(([extension]) => extension.test(name))?.[1](root);
   if (interpreter !== undefined) {
     return {
       file: interpreter,
@@ -78,7 +90,7 @@ export function commandOf(root: string, name: string): Command {
     };
   }
   const script = packageScript(root, name);
-  if (script !== undefined) return { file: process.execPath, args: [script], missing: "" };
+  if (script !== undefined) return { file: repoNode(root), args: [script], missing: "" };
   if (name.includes("/")) return { file: resolve(root, name), args: [], missing: `${name} does not exist.` };
   return {
     file: name,
@@ -88,10 +100,8 @@ export function commandOf(root: string, name: string): Command {
 }
 
 // A program by its path, or by its name on the PATH, that the system would execute.
-function executable(file: string): boolean {
-  const candidates = isAbsolute(file)
-    ? [file]
-    : (process.env.PATH ?? "").split(delimiter).map((dir) => join(dir, file));
+function executable(file: string, path = process.env.PATH ?? ""): boolean {
+  const candidates = isAbsolute(file) ? [file] : path.split(delimiter).map((dir) => join(dir, file));
   return candidates.some((candidate) => {
     try {
       accessSync(candidate, constants.X_OK);
@@ -109,7 +119,7 @@ function missingProgram(root: string, name: string): string | undefined {
   } catch {
     return undefined;
   }
-  return command.missing && !executable(command.file) ? command.missing : undefined;
+  return command.missing && !executable(command.file, toolEnv(root).PATH) ? command.missing : undefined;
 }
 
 /**
@@ -137,10 +147,17 @@ export function filesOf(gate: Gate, changed: string[]): string[] {
 /**
  * The lines of output a turn added, less the ignored ones. With a key, a line is told by the part the key matches. A
  * line of a new key is still an old one, each line of the turn start whose key went standing for one line only: first
- * when it says the same as such a line, that problem reported elsewhere; then when the first group of the key, its
- * place, is the one of such a line, that problem changed where it is.
+ * when it says the same as such a line, that problem reported elsewhere, unless the group of the key named file names
+ * a file the turn changed, where the agent may have written it; then when the first group of the key, its place, is
+ * the one of such a line, that problem changed where it is.
  */
-export function newLines(before: string, after: string, ignore?: string, key?: string): string[] {
+export function newLines(
+  before: string,
+  after: string,
+  ignore?: string,
+  key?: string,
+  changed: string[] = [],
+): string[] {
   const ignored = ignore === undefined ? undefined : new RegExp(ignore);
   const keyed = key === undefined ? undefined : new RegExp(key);
   const lines = (text: string) =>
@@ -150,6 +167,7 @@ export function newLines(before: string, after: string, ignore?: string, key?: s
       .filter(Boolean);
   const keyOf = (line: string) => keyed?.exec(line)?.[0] ?? line;
   const placeOf = (line: string) => keyed?.exec(line)?.[1];
+  const written = (line: string) => changed.includes(keyed?.exec(line)?.groups?.file ?? "");
   const restOf = (line: string) => line.replace(keyOf(line), "").trim();
   const old = lines(before);
   const now = lines(after);
@@ -163,7 +181,7 @@ export function newLines(before: string, after: string, ignore?: string, key?: s
   };
   return now
     .filter((line) => !oldKeys.has(keyOf(line)) && !ignored?.test(line))
-    .filter((line) => !restOf(line) || !stillOld((was) => restOf(was) === restOf(line)))
+    .filter((line) => !restOf(line) || written(line) || !stillOld((was) => restOf(was) === restOf(line)))
     .filter((line) => placeOf(line) === undefined || !stillOld((was) => placeOf(was) === placeOf(line)));
 }
 
@@ -192,7 +210,7 @@ async function execute(root: string, gate: Gate, args: string[]): Promise<Execut
         cwd: root,
         timeout: gate.timeoutSeconds * 1000,
         maxBuffer: MAX_OUTPUT_MB * 1024 * 1024,
-        env: TOOL_ENV,
+        env: toolEnv(root),
       },
       (error, stdout, stderr) => {
         resolve({
@@ -228,9 +246,18 @@ export function cleaned(root: string, printed: string): string {
   return stripVTControlCharacters(printed).split(`${root}${sep}`).join("").trim();
 }
 
-/** Runs a compared gate on the whole project, as the turn starts. */
-export function wholeProject(root: string, gate: Gate): Promise<{ ok: boolean; output: string }> {
-  return execute(root, gate, gate.run.slice(1));
+/**
+ * Runs a compared gate on the whole project, as the turn starts, in the time the gate has or less: nothing when it
+ * runs out of it, since its lines would all be new at the stop.
+ */
+export async function wholeProject(
+  root: string,
+  gate: Gate,
+  ms = gate.timeoutSeconds * 1000,
+): Promise<{ ok: boolean; output?: string }> {
+  const timeoutSeconds = Math.min(gate.timeoutSeconds, ms / 1000);
+  const { ok, output, timedOut } = await execute(root, { ...gate, timeoutSeconds }, gate.run.slice(1));
+  return timedOut ? { ok: false } : { ok, output };
 }
 
 /**
@@ -248,15 +275,20 @@ export async function check(
   const ran = { name: gate.name, ms, report: ok ? output : undefined };
   if (timedOut) return { ...ran, ok, output, timedOut };
   if (!isCompared(gate) || !ok) return { ...ran, ok, output };
-  return { ...ran, ...addedLines(gate, output, baseline) };
+  return { ...ran, ...addedLines(gate, output, baseline, files) };
 }
 
 /**
  * Judges the output of a compared gate that ran clean: it fails on the lines the turn added to the report of the turn
  * start. Without that report, nothing counts but the exit code.
  */
-export function addedLines(gate: Gate, output: string, baseline: string | undefined): { ok: boolean; output: string } {
+export function addedLines(
+  gate: Gate,
+  output: string,
+  baseline: string | undefined,
+  changed: string[],
+): { ok: boolean; output: string } {
   if (baseline === undefined) return { ok: true, output: "" };
-  const added = newLines(baseline, output, gate.ignoreLines, gate.lineKey);
+  const added = newLines(baseline, output, gate.ignoreLines, gate.lineKey, changed);
   return { ok: added.length === 0, output: added.join("\n") };
 }

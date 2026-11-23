@@ -96,7 +96,7 @@
       }
     },
     {
-      "description": "Type-checks the project with strictNullChecks and strictPropertyInitialization on, and fails only on the errors the turn added: a project that turned them off, with more errors than it can fix at once, stops growing new ones. An error is told by its file, code and source line, since tsc prints the types of a message otherwise from one compilation to the next: one a change moves to another line is not new, nor one tsc reports in another file with the same message, nor one on a line the turn changed, as long as its file has no more errors of its code than at the turn start. The agent still reads the message. tsc keeps watching between turns; without the watch, it runs at each prompt and stop instead. Refused when tsconfig.json only references others, as in an Angular project, since tsc would check no file: give it -p and a tsconfig. The whole check counts every error.",
+      "description": "Type-checks the project with strictNullChecks and strictPropertyInitialization on, and fails only on the errors the turn added: a project that turned them off, with more errors than it can fix at once, stops growing new ones. An error is told by its file, code and source line, since tsc prints the types of a message otherwise from one compilation to the next: one a change moves to another line is not new, nor one tsc reports with the same message in another file the turn did not change, nor one on a line the turn changed, as long as its file has no more errors of its code than at the turn start. The agent still reads the message. tsc keeps watching between turns; without the watch, it runs at each prompt and stop instead. Refused when tsconfig.json only references others, as in an Angular project, since tsc would check no file: give it -p and a tsconfig. The whole check counts every error.",
       "requires": [
         {
           "tool": "typescript",
@@ -109,7 +109,7 @@
         "files": "(\\.(ts|tsx)|^tsconfig.*\\.json)$",
         "run": ["{engine}/src/helpers/type-errors.ts", "--strictNullChecks", "--strictPropertyInitialization"],
         "compare": "turn-start",
-        "lineKey": "^(.+?: error TS\\d+) at [^\\t]*",
+        "lineKey": "^((?<file>.+?): error TS\\d+) at [^\\t]*",
         "watch": {
           "run": [
             "{engine}/src/helpers/type-errors.ts",

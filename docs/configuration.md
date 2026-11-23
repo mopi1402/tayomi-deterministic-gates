@@ -33,10 +33,10 @@ The gates of a repo live in `.gates.json` at its root, committed. Each one names
 
 Some tools print the same problem otherwise from one run to the next: tsc writes the types of a message in the order it happened to create them. `lineKey` names the part of a line that tells the problem apart, and the rest is for the agent alone. A line is new when no line of the turn start had its key, unless a line of the turn start whose key went stands for it, each one for a single line:
 
-1. one that says the same: that problem is reported elsewhere;
+1. one that says the same: that problem is reported elsewhere, unless the key has a group named `file` that names a file the turn changed, where the agent may have written it;
 2. then, when the key has a group, one whose first group is the same: that problem changed where it is.
 
-`no-new-strict-errors` prints its key, the file, code and source line of an error, before a tab, and the message after it. Its `lineKey` is `^(.+?: error TS\d+) at [^\t]*`, whose group is the file and code: an error on a line the turn changed stays old as long as its file has no more errors of its code than at the turn start.
+`no-new-strict-errors` prints its key, the file, code and source line of an error, before a tab, and the message after it. Its `lineKey` is `^((?<file>.+?): error TS\d+) at [^\t]*`, whose first group is the file and code: an error on a line the turn changed stays old as long as its file has no more errors of its code than at the turn start.
 
 ## How `run` finds its program
 
@@ -44,10 +44,10 @@ The first word of `run` is looked up in this order, so a gate can run Node, Pyth
 
 1. a script of this engine under `{engine}/`, such as `{engine}/src/helpers/new-clones.ts`;
 2. a script of the repo by its path, run on the interpreter of its extension: `.ts`, `.js` and `.mjs` on Node, `.py` on `python3`;
-3. a package of the repo's `node_modules`, run through its command, such as `eslint`;
+3. a package of the repo's `node_modules`, run through its command on Node, such as `eslint`;
 4. a program: by its path in the repo, such as `.venv/bin/ruff`, or by its name on the `PATH`, such as `go`, `gofmt` or `ruff`.
 
-A tool the repo pins beats one on the `PATH`, so write the pinned form when there is one, such as `["uv", "run", "ruff", ...]`. A gate whose program is not installed never runs, and the other gates still do. As a prompt arrives, the agent is asked to install the tool and you are told which gates are off. It is asked once, and again only when the list of missing tools changes or the session starts again.
+Node is the one the repo pins as a package, in `node_modules/.bin`, as npx finds it, or else the one running the engine. A tool runs with `node_modules/.bin` first on its `PATH`, so the programs it starts find the same. A tool the repo pins beats one on the `PATH`, so write the pinned form when there is one, such as `["uv", "run", "ruff", ...]`. A gate whose program is not installed never runs, and the other gates still do. As a prompt arrives, the agent is asked to install the tool and you are told which gates are off. It is asked once, and again only when the list of missing tools changes or the session starts again.
 
 In the arguments, `{files}` expands to the changed files the gate looks at, and `{turn}` to the commit that holds the tree as the turn started.
 
@@ -91,11 +91,11 @@ A gate with `compare` judges its watch the same way, on the lines added: at the 
 
 Next to `gates`, a gates file may set these, and a value in `.gates.local.json` wins:
 
-| Setting             | Default | Meaning                                                                                                                                                                                            |
-| ------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `maxTimeoutSeconds` | `45`    | The time the gates of a check have, all together. A gate still running then is stopped: it shows out of time, neither green nor red, and never sends the agent back. A slower check belongs in CI. |
-| `maxSendBacks`      | `5`     | The most times a turn sends the agent back, `0` never. Past it, the agent hands back and the summary says why.                                                                                     |
-| `showAllPasses`     | `false` | `true` names every green gate, six to a line, where the summary names the six slowest and counts the rest, as in `... +5`.                                                                         |
+| Setting             | Default | Meaning                                                                                                                                                                                                                                                                                                                  |
+| ------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `maxTimeoutSeconds` | `45`    | The time the gates of a check have, all together. A gate still running then is stopped: it shows out of time, neither green nor red, and never sends the agent back. A slower check belongs in CI. An Angular project of a thousand specs takes about 50 s to rebuild and test a change many files import: give it `90`. |
+| `maxSendBacks`      | `5`     | The most times a turn sends the agent back, `0` never. Past it, the agent hands back and the summary says why.                                                                                                                                                                                                           |
+| `showAllPasses`     | `false` | `true` names every green gate, six to a line, where the summary names the six slowest and counts the rest, as in `... +5`.                                                                                                                                                                                               |
 
 ## Override the gates for yourself
 

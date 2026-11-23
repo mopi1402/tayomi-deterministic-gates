@@ -149,6 +149,40 @@ describe("the reports a check leaves for the next turn", () => {
   }
 });
 
+describe("a prompt whose hook is stopped before the reports of its turn start are ready", () => {
+  test("has already started its turn: the send-backs of the turn before are gone", async () => {
+    writeFileSync(join(repo, "tool.mjs"), 'setTimeout(() => console.log("old"), 300)');
+    gates({ name: "dead", severity: "error", files: "\\.ts$", run: ["tool.mjs"], compare: "turn-start" });
+    await startTurn(session, repo);
+    await checkTurn(session, repo);
+    const checked = readTurn(session, repo);
+    assert.ok(checked);
+    writeTurn(session, repo, { ...checked, sendBacks: { count: 2, waivers: {}, reports: {} } });
+    writeFileSync(join(repo, "a.ts"), "1");
+    const starting = startTurn(session, repo);
+    const started = readTurn(session, repo);
+    assert.equal(started?.checked, false);
+    assert.equal(started?.sendBacks, undefined);
+    await starting;
+  });
+});
+
+describe("a report out of time as the turn started", () => {
+  test("is no report: the turn says it has none to compare with, where its lines would all be new", async () => {
+    writeFileSync(join(repo, "tool.mjs"), 'setTimeout(() => console.log("old"), 3000)');
+    gates({
+      name: "dead",
+      severity: "error",
+      files: "\\.ts$",
+      run: ["tool.mjs"],
+      compare: "turn-start",
+      timeoutSeconds: 1,
+    });
+    await startTurn(session, repo);
+    assert.deepEqual(readTurn(session, repo)?.baselines, {});
+  });
+});
+
 describe("a report that broke as the turn started", () => {
   test("serves that turn, but is never kept for the next one", async () => {
     writeFileSync(join(repo, "tool.mjs"), 'console.log("boom"); process.exit(2)');

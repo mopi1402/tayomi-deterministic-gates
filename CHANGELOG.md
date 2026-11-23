@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.1
+
+### Fixed
+
+- A package of the repo, such as `ng` or `tsc`, and a script of the repo run on the Node the repo pins as a package in `node_modules/.bin`, as npx runs them, where they ran on the Node of the engine: an Angular project tested on another Node than its own had specs red that pass with `ng test`. Every tool runs with `node_modules/.bin` first on its `PATH`, so the programs it starts find the same
+- `no-new-strict-errors` reports a new error that says what an old one the turn fixed in another file said, which it took for that one reported elsewhere. A `lineKey` may name a group `file`: a line of a file the turn changed is never one reported elsewhere. The catalog's key is now `"^((?<file>.+?): error TS\\d+) at [^\\t]*"`, and a copy of the gate with the key of 0.6.0 works as it did
+- The `tests` gate of the Angular catalog reports the state of the specs and the errors of a build that failed, without the table of the files the build wrote: in a large project it hid the failed specs, and since its file names change at each build, a waiver of the gate fell at every stop. The line that ends a run no longer gives Angular's reason, which said all tests passed of a run with failed specs. A watch that stops prints the last 20 lines of `ng test`
+- A new prompt restarts the send-backs of the turn, which went on from the turn before when the prompt's hook did not finish, as when it ran out of its 60 s: the turn is recorded before the reports of its start run, and those reports have 45 s, together, where a compared gate without a watch had the whole time of the check
+
 ## 0.6.0
 
 ### Changed

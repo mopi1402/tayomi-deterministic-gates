@@ -53,6 +53,8 @@ const ORDER = `export function describeOrder(items: string[], total: number, cur
 const TAGS = "export function tags(k: string): string[] | undefined {\n  return k ? undefined : [k];\n}\n";
 const SPREAD = (name: string) => `import { tags } from "./tags.ts";\n\nexport const ${name} = [...tags("${name}")];\n`;
 
+const MAYBE = (name: string) => `export const ${name}: string = ["a"].find(Boolean);\n`;
+
 const ADD = (body: string) => `export function add(a: number, b: number): number {\n  return ${body};\n}\n`;
 
 /** A component whose template is a file of its own, which the template lint reads. */
@@ -169,6 +171,13 @@ export class Hello {
         edits: { "src/tags.ts": `${TAGS}\nexport const broken: Set<string> = null;\n` },
         says: /^src\/tags\.ts: error TS2322 at `export const broken: Set<string> = null;`/m,
         saysNot: /TS2488/,
+      },
+      {
+        gate: "no-new-strict-errors",
+        what: "a new error that says what an old one the turn fixed in another file said",
+        start: { "src/old.ts": MAYBE("old") },
+        edits: { "src/old.ts": MAYBE("old").replace(";\n", ' ?? "";\n'), "src/fresh.ts": MAYBE("fresh") },
+        says: /^src\/fresh\.ts: error TS2322/m,
       },
       {
         gate: "no-new-dead-code",

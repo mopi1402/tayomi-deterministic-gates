@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -148,6 +148,15 @@ describe("newLines", () => {
       "src/b.ts: TS2 at `for (u of b)`\tNot what it was",
     ]);
   });
+
+  test("never keeps as reported elsewhere a line of a file the turn changed, which the file group of the key names", () => {
+    const FILE = "^((?<file>.+?): TS\\d+) at [^\\t]*";
+    const before = "src/a.ts: TS1 at `let x = a;`\tMaybe undefined\nsrc/c.ts: TS2 at `for (v of c)`\tNot iterable";
+    const after = "src/b.ts: TS1 at `let y = b;`\tMaybe undefined\nsrc/d.ts: TS2 at `for (w of d)`\tNot iterable";
+    assert.deepEqual(newLines(before, after, undefined, FILE, ["src/a.ts", "src/b.ts"]), [
+      "src/b.ts: TS1 at `let y = b;`\tMaybe undefined",
+    ]);
+  });
 });
 
 describe("check, on any language", () => {
@@ -172,6 +181,25 @@ describe("check, on any language", () => {
     const outcome = await check(root, { ...LINT, run: ["tool.mjs"] }, ["a.ts"], "abc", undefined);
     assert.equal(outcome.ok, false);
     assert.equal(outcome.output, `${join("src", "a.ts")}: bad`);
+  });
+
+  test("runs a package and a script of the repo on the Node the repo pins, and its tools with node_modules/.bin first", async () => {
+    // A repo may pin its Node as a package, which npx finds first: here one that says it was used.
+    mkdirSync(join(root, "node_modules", ".bin"), { recursive: true });
+    const node = join(root, "node_modules", ".bin", "node");
+    writeFileSync(node, `#!/bin/sh\nPINNED=yes exec "${process.execPath}" "$@"\n`);
+    chmodSync(node, 0o755);
+    mkdirSync(join(root, "node_modules", "say"));
+    writeFileSync(join(root, "node_modules", "say", "package.json"), JSON.stringify({ bin: "say.mjs" }));
+    const says =
+      'import { delimiter } from "node:path"; console.log(process.env.PINNED, process.env.PATH.split(delimiter)[0])';
+    writeFileSync(join(root, "node_modules", "say", "say.mjs"), says);
+    tool(says);
+    const bin = join("node_modules", ".bin");
+    for (const name of ["say", "tool.mjs"]) {
+      const outcome = await check(root, { ...LINT, run: [name] }, ["a.ts"], "abc", undefined);
+      assert.equal(outcome.output, `yes ${bin}`, name);
+    }
   });
 
   test("fails when its command is not installed, instead of breaking the whole check", async () => {

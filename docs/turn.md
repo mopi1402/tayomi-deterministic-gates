@@ -87,9 +87,11 @@ flowchart TD
 
 ## The compared gates
 
-A compared gate fails on the lines of output the turn added: the lines its start report does not hold as they are, so a problem that moves to another line or is reworded counts as new too. The lines stay new in the next turns until they are fixed: a report the agent leaves failing is not the next turn's baseline.
+A compared gate fails on the lines of output the turn added: the lines its start report does not hold as they are, so a problem that moves to another line or is reworded counts as new too, unless its `lineKey` says otherwise. The lines stay new in the next turns until they are fixed: a report the agent leaves failing is not the next turn's baseline.
 
 The command exits with 0 when it finds problems, as `knip --no-exit-code` or `gofmt -l` do. Any other exit code fails the gate, even when it printed the same thing as the turn started.
+
+The prompt's hook has 60 s, so the start reports have 45 s, together: a command still running then gives none, and the stop says the gate had no report to compare with. The turn is recorded before they run, so a hook stopped anyway still ends the turn before, its send-backs with it.
 
 ## What the engine keeps
 

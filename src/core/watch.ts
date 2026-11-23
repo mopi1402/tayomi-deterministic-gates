@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type Gate, isCompared, type Watch, type WatchedGate } from "./config.ts";
-import { addedLines, cleaned, commandOf, ENGINE_VERSION, type Outcome, TOOL_ENV } from "./run.ts";
+import { addedLines, cleaned, commandOf, ENGINE_VERSION, type Outcome, toolEnv } from "./run.ts";
 
 // Once a cycle closes, the lines a watch prints after it, such as the errors of a failed build, come within this long.
 const QUIET_MS = 1000;
@@ -26,8 +26,8 @@ const UNSEEN_MS = 5000;
 const POLL_MS = 100;
 // What a watch that stopped leaves the agent: enough to see the error, not the whole history of the session.
 const LAST_LINES = 20;
-// A prompt waits this long at most for a compared watch to settle, under the 60 s its hook has.
-const TURN_START_MS = 45_000;
+// A prompt waits this long at most for the reports of its compared gates, under the 60 s its hook has.
+export const TURN_START_MS = 45_000;
 
 const PREFIX = "gates-watch-";
 // A start that holds its lock longer than this died on the way: the next hook takes the lock over.
@@ -132,7 +132,7 @@ function launch(folder: string, root: string, watch: Watch): void {
     cwd: root,
     detached: true,
     stdio: ["ignore", log, log],
-    env: TOOL_ENV,
+    env: toolEnv(root),
   });
   closeSync(log);
   child.on("error", () => {});
@@ -240,7 +240,7 @@ export async function judgeWatch(
   const { cycle } = settled;
   const fails = new RegExp(gate.watch.failed ?? "(?!)");
   const judged = isCompared(gate)
-    ? addedLines(gate, cycle, baseline)
+    ? addedLines(gate, cycle, baseline, files)
     : { ok: !cycle.split("\n").some((line) => fails.test(line)), output: cycle };
   return { name, ms, ...judged, report: judged.ok ? cycle : undefined };
 }

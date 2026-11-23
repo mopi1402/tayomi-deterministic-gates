@@ -5,7 +5,7 @@ import { cachedReports, cacheReports } from "./report-cache.ts";
 import { check, filesOf, givenFiles, missingTool, type Outcome, wholeProject } from "./run.ts";
 import { changedSince, emptyCommit, hasCommit, lastCommit, snapshot, workingTree } from "./snapshot.ts";
 import { readTurn, type TurnState, writeTurn } from "./turn-state.ts";
-import { judgeWatch, keepWatch, startWatch, watchReport } from "./watch.ts";
+import { judgeWatch, keepWatch, startWatch, TURN_START_MS, watchReport } from "./watch.ts";
 
 export interface CheckedTurn {
   changed: string[];
@@ -70,12 +70,14 @@ export async function startTurn(session: string, root: string): Promise<string[]
     return told;
   }
   const { commit: start, tree } = snapshot(root);
+  // The turn starts before its reports are ready: a hook stopped for lack of time leaves it, never the turn before.
+  writeTurn(session, root, { start, baselines: {}, config, checked: false });
   const cached = cachedReports(root, tree);
   const baselines = await Promise.all(
     compared.map(async (gate): Promise<{ gate: Gate; ok: boolean; output?: string }> => {
       const cachedReport = cached(gate);
       if (cachedReport !== undefined) return { gate, ok: true, output: cachedReport };
-      if (!keepsWatch(gate)) return { gate, ...(await wholeProject(root, gate)) };
+      if (!keepsWatch(gate)) return { gate, ...(await wholeProject(root, gate, TURN_START_MS)) };
       const output = await watchReport(session, root, gate);
       return { gate, ok: output !== undefined, output };
     }),
