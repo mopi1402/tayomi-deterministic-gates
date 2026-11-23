@@ -114,6 +114,40 @@ describe("newLines", () => {
     const after = "Unused exports (2)\nsrc/a.ts: old\nsrc/b.ts: fresh\n";
     assert.deepEqual(newLines(before, after, "\\(\\d+\\)$"), ["src/b.ts: fresh"]);
   });
+
+  const KEY = "^[^\\t]*";
+
+  test("tells a line by its key when the gate gives one, whatever the rest of it says", () => {
+    const before = "src/a.ts: TS1 at `x`\tType 'A | B'";
+    const after = "src/a.ts: TS1 at `x`\tType 'B | A'\nsrc/a.ts: TS1 at `y`\tType 'C'";
+    assert.deepEqual(newLines(before, after, undefined, KEY), ["src/a.ts: TS1 at `y`\tType 'C'"]);
+  });
+
+  test("keeps as old a line of a new key that says the same as a line of the turn start whose key went", () => {
+    const before = "src/a.ts: TS2 at `for (x of a)`\tNot iterable\nsrc/a.ts: TS1 at `z`\tOld";
+    const after = [
+      "src/b.ts: TS2 at `for (y of b)`\tNot iterable",
+      "src/a.ts: TS1 at `z`\tOld",
+      "src/c.ts: TS2 at `for (w of c)`\tNot iterable",
+    ].join("\n");
+    assert.deepEqual(newLines(before, after, undefined, KEY), ["src/c.ts: TS2 at `for (w of c)`\tNot iterable"]);
+  });
+
+  test("keeps as old a line of a new key whose place, the first group of the key, lost a line, one for one", () => {
+    const PLACE = "^(.+?: TS\\d+) at [^\\t]*";
+    const before =
+      "src/a.ts: TS1 at `let x = a;`\tType '{ a: 1; b: 2; }'\nsrc/b.ts: TS2 at `for (v of b)`\tNot iterable";
+    const after = [
+      "src/a.ts: TS1 at `let y = a;`\tType '{ b: 2; a: 1; }'",
+      "src/a.ts: TS1 at `let z = b;`\tType 'B'",
+      "src/a.ts: TS2 at `for (w of a)`\tNot iterable",
+      "src/b.ts: TS2 at `for (u of b)`\tNot what it was",
+    ].join("\n");
+    assert.deepEqual(newLines(before, after, undefined, PLACE), [
+      "src/a.ts: TS1 at `let z = b;`\tType 'B'",
+      "src/b.ts: TS2 at `for (u of b)`\tNot what it was",
+    ]);
+  });
 });
 
 describe("check, on any language", () => {

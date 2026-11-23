@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0
+
+### Changed
+
+- `no-new-strict-errors` prints each error as a key, its file, code and source line, then its message after a tab, and the catalog gives it a `lineKey` to compare by. A copy of the gate in a `.gates.json` needs that `lineKey` too, `"^(.+?: error TS\\d+) at [^\\t]*"`: without it, the whole line is compared, message included, and the errors a project already had come back as new
+
+### Added
+
+- `lineKey` on a compared gate: a regular expression for the part of a line that tells it apart, when the rest prints otherwise from run to run. A line of a new key is still an old one, each line of the turn start whose key went standing for one line only: when it says the same as such a line, a problem reported elsewhere; then, when the first group of the key is the one of such a line, a problem that changed where it is
+
+### Fixed
+
+- `no-new-strict-errors` no longer reports the errors a project already had as new. A watch of tsc checks again only the files a change reaches, with types created in another order: the members of a union, the properties of an object, and the file of an error tsc reports once per type all change. An error is now told by its file, code and source line, its message following after a tab for the agent, cut at 300 characters. An error on a line the turn changed stays old as long as its file has no more errors of its code than at the turn start. The sort of 0.5.1, which mixed the unions of different properties, is gone
+
 ## 0.5.1
 
 ### Fixed

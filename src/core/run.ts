@@ -134,13 +134,37 @@ export function filesOf(gate: Gate, changed: string[]): string[] {
   return changed.filter((file) => pattern.test(file));
 }
 
-export function newLines(before: string, after: string, ignore?: string): string[] {
+/**
+ * The lines of output a turn added, less the ignored ones. With a key, a line is told by the part the key matches. A
+ * line of a new key is still an old one, each line of the turn start whose key went standing for one line only: first
+ * when it says the same as such a line, that problem reported elsewhere; then when the first group of the key, its
+ * place, is the one of such a line, that problem changed where it is.
+ */
+export function newLines(before: string, after: string, ignore?: string, key?: string): string[] {
   const ignored = ignore === undefined ? undefined : new RegExp(ignore);
-  const seen = new Set(before.split("\n").map((line) => line.trim()));
-  return after
-    .split("\n")
-    .map((line) => line.trim())
-    .filter((line) => line && !seen.has(line) && !ignored?.test(line));
+  const keyed = key === undefined ? undefined : new RegExp(key);
+  const lines = (text: string) =>
+    text
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean);
+  const keyOf = (line: string) => keyed?.exec(line)?.[0] ?? line;
+  const placeOf = (line: string) => keyed?.exec(line)?.[1];
+  const restOf = (line: string) => line.replace(keyOf(line), "").trim();
+  const old = lines(before);
+  const now = lines(after);
+  const oldKeys = new Set(old.map(keyOf));
+  const nowKeys = new Set(now.map(keyOf));
+  const gone = old.filter((line) => !nowKeys.has(keyOf(line)));
+  const stillOld = (same: (was: string) => boolean) => {
+    const at = gone.findIndex(same);
+    if (at !== -1) gone.splice(at, 1);
+    return at !== -1;
+  };
+  return now
+    .filter((line) => !oldKeys.has(keyOf(line)) && !ignored?.test(line))
+    .filter((line) => !restOf(line) || !stillOld((was) => restOf(was) === restOf(line)))
+    .filter((line) => placeOf(line) === undefined || !stillOld((was) => placeOf(was) === placeOf(line)));
 }
 
 interface Executed {
@@ -233,6 +257,6 @@ export async function check(
  */
 export function addedLines(gate: Gate, output: string, baseline: string | undefined): { ok: boolean; output: string } {
   if (baseline === undefined) return { ok: true, output: "" };
-  const added = newLines(baseline, output, gate.ignoreLines);
+  const added = newLines(baseline, output, gate.ignoreLines, gate.lineKey);
   return { ok: added.length === 0, output: added.join("\n") };
 }

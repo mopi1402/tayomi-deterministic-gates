@@ -2,43 +2,58 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { typeErrors, watching } from "./type-errors.ts";
 
+const SOURCE = "export function first(items: string[]): string {\n  const found: string = items.find(Boolean);\n}\n";
+const sources = (files: Record<string, string>) => (file: string) => files[file];
 const UNDEFINED = [
-  "a.ts(2,47): error TS2322: Type 'string | undefined' is not assignable to type 'string'.",
+  "a.ts(2,9): error TS2322: Type 'string | undefined' is not assignable to type 'string'.",
   "  Type 'undefined' is not assignable to type 'string'.",
 ];
-const ONE_LINE = "a.ts: error TS2322: Type 'string | undefined' is not assignable to type 'string'.";
+const ONE_LINE =
+  "a.ts: error TS2322 at `const found: string = items.find(Boolean);`\tType 'string | undefined' is not assignable to type 'string'.";
+const key = (line: string) => line.split("\t")[0];
 
 describe("the type errors of tsc", () => {
-  test("print each error on one line, with its file and none of its line and column, nor the lines that explain it", () => {
-    assert.deepEqual(typeErrors(UNDEFINED), [ONE_LINE]);
+  test("print each error on one line: its file, code and source line, then its first line of message", () => {
+    assert.deepEqual(typeErrors(UNDEFINED, sources({ "a.ts": SOURCE })), [ONE_LINE]);
   });
 
-  test("count an error a file already has, so that one more of it is new", () => {
-    const again = UNDEFINED.map((line) => line.replace("(2,47)", "(9,3)"));
-    assert.deepEqual(typeErrors([...UNDEFINED, ...again]), [ONE_LINE, `${ONE_LINE} (2)`]);
-  });
-
-  test("print an error the same whatever order tsc gave the members of its unions", () => {
+  test("tell an error by its source line, however tsc prints its types and wherever a change moves it", () => {
     const initial = [
-      `a.ts(3,5): error TS2322: Type '"failed" | "LOH" | { kind: "b" | "a"; tags?: Set<"y" | "x">; on: Set<(a: "y" | "x") => 1 | 0> } | undefined' is not assignable to type 'Status'.`,
+      `a.ts(2,9): error TS2322: Type '{ count: number; 'b-c'?: "y" | "x"; name: string; }' is not assignable to type 'Row'.`,
     ];
     const incremental = [
-      `a.ts(3,5): error TS2322: Type '"failed" | { kind: "a" | "b"; tags?: Set<"x" | "y">; on: Set<(a: "x" | "y") => 0 | 1> } | undefined | "LOH"' is not assignable to type 'Status'.`,
+      `a.ts(4,9): error TS2322: Type '{ name: string; count: number; 'b-c'?: "x" | "y"; }' is not assignable to type 'Row'.`,
     ];
-    assert.deepEqual(typeErrors(initial), typeErrors(incremental));
-    assert.deepEqual(typeErrors(initial), [
-      `a.ts: error TS2322: Type '"LOH" | "failed" | undefined | { kind: "a" | "b"; tags?: Set<"x" | "y">; on: Set<(a: "x" | "y") => 0 | 1> }' is not assignable to type 'Status'.`,
+    const [before = ""] = typeErrors(initial, sources({ "a.ts": SOURCE }));
+    const [after = ""] = typeErrors(incremental, sources({ "a.ts": `// one\n// two\n${SOURCE}` }));
+    assert.equal(key(after), key(before));
+    assert.equal(key(before), "a.ts: error TS2322 at `const found: string = items.find(Boolean);`");
+  });
+
+  test("count an error a file already has on the same source, so that one more of it is new", () => {
+    const again = UNDEFINED.map((line) => line.replace("(2,9)", "(3,9)"));
+    const twice = SOURCE.replace("}\n", "  const found: string = items.find(Boolean);\n}\n");
+    assert.deepEqual(typeErrors([...UNDEFINED, ...again], sources({ "a.ts": twice })).map(key), [
+      key(ONE_LINE),
+      `${key(ONE_LINE)} (2)`,
     ]);
   });
 
+  test("cut a long message, which only the agent reads", () => {
+    const long = `a.ts(2,9): error TS2322: Type '${"x".repeat(400)}' is not assignable to type 'string'.`;
+    const [line = ""] = typeErrors([long], sources({ "a.ts": SOURCE }));
+    assert.equal(line.split("\t")[1]?.length, 301);
+    assert.ok(line.endsWith("…"));
+  });
+
   test("keep an error of no file as tsc prints it", () => {
-    assert.deepEqual(typeErrors(["error TS5083: Cannot read file 'tsconfig.base.json'.", ""]), [
+    assert.deepEqual(typeErrors(["error TS5083: Cannot read file 'tsconfig.base.json'.", ""], sources({})), [
       "error TS5083: Cannot read file 'tsconfig.base.json'.",
     ]);
   });
 
   test("of a watch, print each compilation between a line that starts it and one that ends it", () => {
-    const watch = watching();
+    const watch = watching(sources({ "a.ts": SOURCE }));
     const printed = [
       "7:53:19 AM - Starting compilation in watch mode...",
       "",

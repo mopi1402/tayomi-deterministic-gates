@@ -25,8 +25,18 @@ The gates of a repo live in `.gates.json` at its root, committed. Each one names
 | `run`            | The command, then its arguments. See below.                                                                                                                                             |
 | `compare`        | `turn-start`: the command runs on the whole project as the turn starts, and only the lines of output the turn added fail the gate. For a tool that exits with 0 when it finds problems. |
 | `ignoreLines`    | A regular expression for lines of output that never count as new, such as a header with a total.                                                                                        |
+| `lineKey`        | For a compared gate, a regular expression for the part of a line that tells it apart, when the rest prints otherwise from run to run. See below.                                        |
 | `timeoutSeconds` | Less time for this gate than the check has, never more.                                                                                                                                 |
 | `watch`          | A long-running command the gate keeps between turns, judged at the stop instead of `run`. See below.                                                                                    |
+
+## A compared gate whose lines print otherwise
+
+Some tools print the same problem otherwise from one run to the next: tsc writes the types of a message in the order it happened to create them. `lineKey` names the part of a line that tells the problem apart, and the rest is for the agent alone. A line is new when no line of the turn start had its key, unless a line of the turn start whose key went stands for it, each one for a single line:
+
+1. one that says the same: that problem is reported elsewhere;
+2. then, when the key has a group, one whose first group is the same: that problem changed where it is.
+
+`no-new-strict-errors` prints its key, the file, code and source line of an error, before a tab, and the message after it. Its `lineKey` is `^(.+?: error TS\d+) at [^\t]*`, whose group is the file and code: an error on a line the turn changed stays old as long as its file has no more errors of its code than at the turn start.
 
 ## How `run` finds its program
 

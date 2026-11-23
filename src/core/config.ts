@@ -10,7 +10,17 @@ const LOCAL_GATES_FILE = ".gates.local.json";
 const DEFAULT_MAX_TIMEOUT_SECONDS = 45;
 // The times a turn sends the agent back: enough for a fix that breaks another gate, never a loop.
 const DEFAULT_MAX_SEND_BACKS = 5;
-const FIELDS = new Set(["name", "severity", "files", "run", "compare", "ignoreLines", "timeoutSeconds", "watch"]);
+const FIELDS = new Set([
+  "name",
+  "severity",
+  "files",
+  "run",
+  "compare",
+  "ignoreLines",
+  "lineKey",
+  "timeoutSeconds",
+  "watch",
+]);
 const WATCH_FIELDS = new Set(["run", "cycleStart", "cycleEnd", "failed"]);
 
 /** In the arguments of a gate: the changed files it looks at, and the commit of the turn start. */
@@ -24,6 +34,8 @@ export interface Gate {
   run: string[];
   compare?: "turn-start";
   ignoreLines?: string;
+  /** The part of a line of a compared gate that tells it apart, when the rest may print otherwise from run to run. */
+  lineKey?: string;
   timeoutSeconds: number;
   watch?: Watch;
 }
@@ -154,7 +166,17 @@ function toWatch(watch: unknown, compared: boolean): Watch {
 }
 
 function toGate(entry: Entry, maxTimeoutSeconds: number): Gate {
-  const { name, severity, files, run, compare, ignoreLines, watch, timeoutSeconds = maxTimeoutSeconds } = entry;
+  const {
+    name,
+    severity,
+    files,
+    run,
+    compare,
+    ignoreLines,
+    lineKey,
+    watch,
+    timeoutSeconds = maxTimeoutSeconds,
+  } = entry;
   const unknown = Object.keys(entry).find((key) => !FIELDS.has(key));
   if (unknown !== undefined) refuse(`unknown field ${unknown}`);
   if (!/^[a-z][a-z0-9-]*$/.test(name)) refuse("a name is lowercase words joined by hyphens");
@@ -166,6 +188,9 @@ function toGate(entry: Entry, maxTimeoutSeconds: number): Gate {
   if (compare !== undefined && run.includes(FILES))
     refuse(`a compared gate reads the whole project: it takes no ${FILES}`);
   if (ignoreLines !== undefined && !isPattern(ignoreLines)) refuse("ignoreLines is a regular expression");
+  if (lineKey !== undefined && !isPattern(lineKey)) refuse("lineKey is a regular expression");
+  if (lineKey !== undefined && compare === undefined)
+    refuse("lineKey tells apart the lines of a compared gate: it takes compare");
   if (typeof timeoutSeconds !== "number" || timeoutSeconds <= 0) refuse("timeoutSeconds is a positive number");
   return {
     name,
@@ -176,6 +201,7 @@ function toGate(entry: Entry, maxTimeoutSeconds: number): Gate {
     timeoutSeconds: Math.min(timeoutSeconds, maxTimeoutSeconds),
     ...(compare === undefined ? {} : { compare }),
     ...(ignoreLines === undefined ? {} : { ignoreLines }),
+    ...(lineKey === undefined ? {} : { lineKey }),
     ...(watch === undefined ? {} : { watch: toWatch(watch, compare !== undefined) }),
   };
 }

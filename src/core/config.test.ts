@@ -84,9 +84,15 @@ describe("parseGates", () => {
     assert.throws(() => parseGates(file(dead)), /takes no \{files\}/);
   });
 
-  test("refuses a files or ignoreLines pattern that is not a regular expression", () => {
+  test("refuses a files, ignoreLines or lineKey pattern that is not a regular expression, and a lineKey with no compare", () => {
     assert.throws(() => parseGates(file({ ...lint, files: "(" })), /files is a regular expression/);
     assert.throws(() => parseGates(file({ ...lint, ignoreLines: "(" })), /ignoreLines is a regular expression/);
+    const compared = { ...lint, run: ["knip"], compare: "turn-start" };
+    assert.throws(() => parseGates(file({ ...compared, lineKey: "(" })), /lineKey is a regular expression/);
+    assert.throws(
+      () => parseGates(file({ ...lint, lineKey: "^[^\\t]*" })),
+      /lineKey tells apart the lines of a compared gate/,
+    );
   });
 
   test("changes only the fields a local entry gives to the shared gate of its name", () => {

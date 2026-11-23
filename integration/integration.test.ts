@@ -19,10 +19,14 @@ interface Fault {
   gate: string;
   what: string;
   edits: Edits;
+  /** The project as the session finds it, before any turn. */
+  start?: Edits;
   /** A turn before the one with the fault, in the same project, such as for a watch that keeps its state. */
   before?: Edits;
   /** What the report of the gate says, when the header alone could come from another failure. */
   says?: RegExp;
+  /** What the report of the gate never says, such as an old problem printed otherwise. */
+  saysNot?: RegExp;
 }
 
 interface Sample {
@@ -45,6 +49,9 @@ const ORDER = `export function describeOrder(items: string[], total: number, cur
   return lines.join("\\n");
 }
 `;
+
+const TAGS = "export function tags(k: string): string[] | undefined {\n  return k ? undefined : [k];\n}\n";
+const SPREAD = (name: string) => `import { tags } from "./tags.ts";\n\nexport const ${name} = [...tags("${name}")];\n`;
 
 const ADD = (body: string) => `export function add(a: number, b: number): number {\n  return ${body};\n}\n`;
 
@@ -151,7 +158,17 @@ export class Hello {
           "src/first.ts":
             "export function first(items: string[]): string {\n  return items.find((item) => item.length > 0);\n}\n",
         },
-        says: /^src\/first\.ts: error TS2322: Type 'string \| undefined'/m,
+        says: /^src\/first\.ts: error TS2322 at `return items\.find\(\(item\) => item\.length > 0\);`\tType 'string \| undefined'/m,
+      },
+      {
+        gate: "no-new-strict-errors",
+        what: "a new error in a file others import, and not an old one tsc then reports in another of them",
+        // tsc reports an iterated union once per type: in the first file it checks, and a watch checking again the
+        // files that import a changed one checks them in another order.
+        start: { "src/tags.ts": TAGS, "src/tags-a.ts": SPREAD("a"), "src/tags-b.ts": SPREAD("b") },
+        edits: { "src/tags.ts": `${TAGS}\nexport const broken: Set<string> = null;\n` },
+        says: /^src\/tags\.ts: error TS2322 at `export const broken: Set<string> = null;`/m,
+        saysNot: /TS2488/,
       },
       {
         gate: "no-new-dead-code",
@@ -257,10 +274,11 @@ function assertInstalled(technology: string, entry: Entry): void {
 }
 
 /** A copy of the sample as a repo of its own, with the given gates, that the agent works in. */
-function project(technology: string, entries: Entry[]) {
+function project(technology: string, entries: Entry[], start: Edits = {}) {
   const sample = sampleDir(technology);
   const root = mkdtempSync(join(tmpdir(), `gates-${technology}-`));
   cpSync(sample, root, { recursive: true, filter: (source) => basename(source) !== "node_modules" });
+  for (const [file, text] of Object.entries(start)) writeFileSync(join(root, file), text);
   if (existsSync(join(sample, "node_modules"))) symlinkSync(join(sample, "node_modules"), join(root, "node_modules"));
   writeFileSync(join(root, ".gates.json"), JSON.stringify({ gates: entries.map(({ definition }) => definition) }));
   execFileSync("git", ["init", "--quiet"], { cwd: root });
@@ -282,8 +300,8 @@ function project(technology: string, entries: Entry[]) {
 }
 
 /** One turn of the agent: prompt, edits, stop. Given edits before, a turn with them comes first, in the same project. */
-async function turn(technology: string, entries: Entry[], edits: Edits, before?: Edits) {
-  const agent = project(technology, entries);
+async function turn(technology: string, entries: Entry[], edits: Edits, before?: Edits, start?: Edits) {
+  const agent = project(technology, entries, start);
   try {
     if (before !== undefined) {
       await agent.prompt();
@@ -334,10 +352,17 @@ describe("the catalogs", { concurrency: SIDE_BY_SIDE }, () => {
         test(`${fault.gate} catches ${fault.what}`, async () => {
           assert.ok(entry, `the catalog has no gate ${fault.gate}`);
           assertInstalled(catalog.id, entry);
-          const { decision, reason, systemMessage } = await turn(catalog.id, runnable, fault.edits, fault.before);
+          const { decision, reason, systemMessage } = await turn(
+            catalog.id,
+            runnable,
+            fault.edits,
+            fault.before,
+            fault.start,
+          );
           assert.equal(decision, "block", systemMessage);
           assert.match(reason ?? "", new RegExp(`^## ${fault.gate}\\n`, "m"));
           if (fault.says) assert.match(reason ?? "", fault.says);
+          if (fault.saysNot) assert.doesNotMatch(reason ?? "", fault.saysNot);
         });
       }
     });
