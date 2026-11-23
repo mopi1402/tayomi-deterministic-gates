@@ -21,6 +21,9 @@ export function failed(outcome: Outcome): boolean {
 }
 
 const ENGINE = resolve(import.meta.dirname, "..", "..");
+const manifest = readJsonFile(join(ENGINE, "package.json"));
+/** The version of this engine: what its helpers print, so what a report holds, may change from one to the next. */
+export const ENGINE_VERSION = isRecord(manifest) ? String(manifest.version) : "";
 /** What a tool runs with: no colour, which some tools print anyway. */
 export const TOOL_ENV = { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" };
 const MAX_OUTPUT_MB = 16;

@@ -200,10 +200,15 @@ export async function checkTurn(session: string, root: string): Promise<CheckedT
   const results = await runGates(root, runnable(gates, missing), changed, turn.start, baselines, session);
   cacheReports(root, end, endReports(results, baselines));
   writeTurn(session, root, { ...turn, checked: true });
-  // A compared gate with no report from the turn start can only count its exit code: a green it did not earn is said.
+  // A compared gate with no report from the turn start can only count its exit code, and a watch has none: a green it
+  // did not earn is said.
   const uncompared = results
     .filter(({ gate, outcome }) => outcome && isCompared(gate) && baselines(gate) === undefined)
-    .map(({ gate }) => `${gate.name} not compared: no report from the turn start, only its exit code counted`);
+    .map(({ gate }) =>
+      keepsWatch(gate)
+        ? `${gate.name} not judged: no report from the turn start to compare its cycle with`
+        : `${gate.name} not compared: no report from the turn start, only its exit code counted`,
+    );
   // Only a gate the turn concerned is named: one that would not have run anyway costs nothing to miss.
   const notRun = missing
     .filter(({ gate }) => filesOf(gate, changed).length)

@@ -9,7 +9,7 @@
       "name": "deterministic-gates",
       "source": "./",
       "description": "Gates that run on what each turn changed and send the agent back until they pass.",
-      "version": "0.5.0"
+      "version": "0.5.1"
     }
   ]
 }

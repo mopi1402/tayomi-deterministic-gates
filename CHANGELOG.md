@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.1
+
+### Fixed
+
+- `no-new-strict-errors` no longer reports the errors a project already had as new after the first compilation of its watch: tsc orders the members of a union otherwise between that compilation and the next ones, so each union prints sorted and untruncated, and an error keeps only its first line, since the lines under it name its first failing member
+- A report kept from a tree, and a running watch, serve only the engine version that made them: a helper may print otherwise from one version to the next, and a report of the old format would have made every line of it new
+- `typecheck` writes no JavaScript: tsc ran with the emit of the project's tsconfig, into its outDir or next to its sources
+- `typecheck` and `no-new-strict-errors` refuse a tsconfig.json that only references others, as the one of an Angular project, where tsc checks no file and the gate was green without checking anything
+- A compared watch with no report from the turn start says it judged nothing, where it said it counted an exit code a watch does not have
+
 ## 0.5.0
 
 ### Added

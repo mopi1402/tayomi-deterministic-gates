@@ -16,7 +16,7 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type Gate, isCompared, type Watch, type WatchedGate } from "./config.ts";
-import { addedLines, cleaned, commandOf, type Outcome, TOOL_ENV } from "./run.ts";
+import { addedLines, cleaned, commandOf, ENGINE_VERSION, type Outcome, TOOL_ENV } from "./run.ts";
 
 // Once a cycle closes, the lines a watch prints after it, such as the errors of a failed build, come within this long.
 const QUIET_MS = 1000;
@@ -51,9 +51,12 @@ export function keepWatch(root: string, gate: Gate): void {
   if (existsSync(folder)) touch(folder);
 }
 
-/** Where a watch keeps its process, its output and the sessions that use it, outside the repo: one per repo and gate. */
+/**
+ * Where a watch keeps its process, its output and the sessions that use it, outside the repo: one per repo, gate and
+ * engine version, since a helper of the engine may print its cycles otherwise from one version to the next.
+ */
 function folderOf(root: string, gate: Gate): string {
-  const key = createHash("sha256").update(`${root}\0${gate.name}`).digest("hex").slice(0, 16);
+  const key = createHash("sha256").update(`${root}\0${gate.name}\0${ENGINE_VERSION}`).digest("hex").slice(0, 16);
   return join(tmpdir(), `${PREFIX}${key}`);
 }
 

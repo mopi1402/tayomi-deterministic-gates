@@ -6,17 +6,29 @@ const UNDEFINED = [
   "a.ts(2,47): error TS2322: Type 'string | undefined' is not assignable to type 'string'.",
   "  Type 'undefined' is not assignable to type 'string'.",
 ];
-const ONE_LINE =
-  "a.ts: error TS2322: Type 'string | undefined' is not assignable to type 'string'. Type 'undefined' is not assignable to type 'string'.";
+const ONE_LINE = "a.ts: error TS2322: Type 'string | undefined' is not assignable to type 'string'.";
 
 describe("the type errors of tsc", () => {
-  test("print each error on one line, with its file and none of its line and column", () => {
+  test("print each error on one line, with its file and none of its line and column, nor the lines that explain it", () => {
     assert.deepEqual(typeErrors(UNDEFINED), [ONE_LINE]);
   });
 
   test("count an error a file already has, so that one more of it is new", () => {
     const again = UNDEFINED.map((line) => line.replace("(2,47)", "(9,3)"));
     assert.deepEqual(typeErrors([...UNDEFINED, ...again]), [ONE_LINE, `${ONE_LINE} (2)`]);
+  });
+
+  test("print an error the same whatever order tsc gave the members of its unions", () => {
+    const initial = [
+      `a.ts(3,5): error TS2322: Type '"failed" | "LOH" | { kind: "b" | "a"; tags?: Set<"y" | "x">; on: Set<(a: "y" | "x") => 1 | 0> } | undefined' is not assignable to type 'Status'.`,
+    ];
+    const incremental = [
+      `a.ts(3,5): error TS2322: Type '"failed" | { kind: "a" | "b"; tags?: Set<"x" | "y">; on: Set<(a: "x" | "y") => 0 | 1> } | undefined | "LOH"' is not assignable to type 'Status'.`,
+    ];
+    assert.deepEqual(typeErrors(initial), typeErrors(incremental));
+    assert.deepEqual(typeErrors(initial), [
+      `a.ts: error TS2322: Type '"LOH" | "failed" | undefined | { kind: "a" | "b"; tags?: Set<"x" | "y">; on: Set<(a: "x" | "y") => 0 | 1> }' is not assignable to type 'Status'.`,
+    ]);
   });
 
   test("keep an error of no file as tsc prints it", () => {

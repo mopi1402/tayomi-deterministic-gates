@@ -40,7 +40,7 @@ The engine reads the waive lines of the agent's last message as the host hands i
 flowchart TD
     stop{At the stop, the start of the turn is} -- recorded, and git still has it --> commit[That commit, with the gates and the start reports of then]
     stop -- recorded, then pruned by git --> pruned[The last commit, with the gates and the start reports of then: the summary says so]
-    stop -- not recorded, as the first stop after the hooks are installed --> none[The last commit of the repo the agent stops in, with the gates of now: a compared gate counts only its exit code, and the summary says so]
+    stop -- not recorded, as the first stop after the hooks are installed --> none[The last commit of the repo the agent stops in, with the gates of now: a compared gate counts only its exit code, a compared watch judges nothing, and the summary says so]
     stop -- the start of a turn you interrupted --> kept[That start, so the check also covers what the interrupted turn changed]
 ```
 

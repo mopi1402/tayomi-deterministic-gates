@@ -18,7 +18,7 @@
       }
     },
     {
-      "description": "Type-checks the project with tsc, since a change in one file can break the types of another. Incremental: tsc keeps what it learnt under node_modules/.cache and re-checks only what the changed files reach.",
+      "description": "Type-checks the project with tsc, since a change in one file can break the types of another, and writes no JavaScript. Incremental: tsc keeps what it learnt under node_modules/.cache and re-checks only what the changed files reach. Refused when tsconfig.json only references others, as in an Angular project, since tsc would check no file: give it -p and a tsconfig.",
       "requires": [
         {
           "tool": "typescript",
@@ -30,9 +30,10 @@
         "severity": "error",
         "files": "(\\.(ts|tsx)|^tsconfig\\.json)$",
         "run": [
-          "typescript",
+          "{engine}/src/helpers/tsc.ts",
           "--pretty",
           "false",
+          "--noEmit",
           "--incremental",
           "--tsBuildInfoFile",
           "node_modules/.cache/gates/tsbuildinfo"
@@ -95,7 +96,7 @@
       }
     },
     {
-      "description": "Type-checks the project with strictNullChecks and strictPropertyInitialization on, and fails only on the errors the turn added: a project that turned them off, with more errors than it can fix at once, stops growing new ones. An error is told by its file, code and message, so one a change moves to another line is not new. tsc keeps watching between turns; without the watch, it runs at each prompt and stop instead. Give -p and a tsconfig when tsconfig.json only references others, as in an Angular project. The whole check counts every error.",
+      "description": "Type-checks the project with strictNullChecks and strictPropertyInitialization on, and fails only on the errors the turn added: a project that turned them off, with more errors than it can fix at once, stops growing new ones. An error is told by its file, code and message, so one a change moves to another line is not new. tsc keeps watching between turns; without the watch, it runs at each prompt and stop instead. Refused when tsconfig.json only references others, as in an Angular project, since tsc would check no file: give it -p and a tsconfig. The whole check counts every error.",
       "requires": [
         {
           "tool": "typescript",

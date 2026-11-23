@@ -571,6 +571,17 @@ describe("a gate that keeps a watch", { concurrency: true }, () => {
     assert.doesNotMatch(shown, /not compared/);
   });
 
+  watchTest("says a compared watch with no report from the turn start judged nothing", async (agent) => {
+    const repo = watched(agent, compared());
+    writeFileSync(join(repo, "a.ts"), "broken");
+    const stopped = await agent.stop(repo);
+    assert.equal(stopped?.decision, undefined);
+    assert.match(
+      stripVTControlCharacters(stopped?.systemMessage ?? ""),
+      /tests not judged: no report from the turn start to compare its cycle with/,
+    );
+  });
+
   watchTest(
     "sends the agent back with the lines a failed build prints after the line that ends its cycle",
     async (agent) => {
