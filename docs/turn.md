@@ -63,7 +63,7 @@ flowchart TD
     running -- yes --> work
     launch --> work[The agent works, the watch reruns on each change]
     work --> stop[The agent stops after changing a file the gate looks at]
-    stop --> settled{No cycle open, and 1 s with no new output and no new change?}
+    stop --> settled{A cycle started after the last change, or none for 5 s, closed, and 1 s with no new output?}
     settled -- not yet --> wait[The engine waits, within the time of the gate]
     wait --> settled
     settled -- yes --> last[The gate is judged on the last cycle of the watch]

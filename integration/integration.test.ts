@@ -301,11 +301,14 @@ async function turn(technology: string, entries: Entry[], edits: Edits, before?:
 }
 
 // Each turn plays in a copy of its sample, with watches of its own: the catalogs run side by side, and the turns of
-// one two at a time, which keeps the tools of a catalog from crowding the machine.
-describe("the catalogs", { concurrency: true }, () => {
+// one two at a time, which keeps the tools of a catalog from crowding the machine. CI runs them one at a time: its
+// machines have few cores and cold caches, and no stop waits on it.
+const SIDE_BY_SIDE = !process.env.CI;
+
+describe("the catalogs", { concurrency: SIDE_BY_SIDE }, () => {
   for (const catalog of readCatalogs(CATALOG_DIR)) {
     const sample = SAMPLES[catalog.id];
-    describe(catalog.id, { concurrency: 2 }, () => {
+    describe(catalog.id, { concurrency: SIDE_BY_SIDE ? 2 : 1 }, () => {
       test("has a sample project, and a fault for every gate of the catalog", () => {
         assert.ok(sample, `integration/${catalog.id} is missing`);
         assert.deepEqual(

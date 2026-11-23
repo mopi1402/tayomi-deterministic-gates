@@ -411,7 +411,8 @@ type Agent = ReturnType<typeof session>;
 
 // A watch of the .ts files of its folder: each change opens a cycle that prints a FAIL line per file holding
 // "broken", and a build failure with its errors after it for a file holding "syntax". It exits on a file holding
-// "crash", and goes when its repo does. Given a file, it writes there when it starts and when it is stopped.
+// "crash", and goes when its repo does. Given a file, it writes there when it starts and when it is stopped. Given a
+// number of milliseconds after it, it looks for changes that seldom, as a watch slowed by a busy machine.
 const WATCH = [
   'import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";',
   'if (process.argv[2]) appendFileSync(process.argv[2], "started\\n");',
@@ -446,7 +447,7 @@ const WATCH = [
   "  seen = now;",
   '  console.log("rebuilding");',
   "  setTimeout(cycle, 100);",
-  "}, 300);",
+  "}, Number(process.argv[3] ?? 300));",
 ].join("\n");
 
 const gate = (watchRun: string[] = ["watch.mjs"], watch: object = {}) => ({
@@ -612,6 +613,21 @@ describe("a gate that keeps a watch", { concurrency: true }, () => {
     }
   });
 
+  watchTest(
+    "judges the turn on the first cycle that starts after its change, however long the watch takes to see it",
+    async (agent) => {
+      const repo = watched(agent, gate(["watch.mjs", "", "3000"]));
+      await agent.prompt(repo);
+      // Changed once the watch has read the files: it sees the change about 2 s later, past the quiet window.
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      writeFileSync(join(repo, "a.ts"), "broken");
+      const started = performance.now();
+      assertSentBackFor(await agent.stop(repo), "a.ts");
+      // Judged as soon as that cycle ends, not once the engine gives up on the watch seeing the change.
+      assert.ok(performance.now() - started < 4500);
+    },
+  );
+
   watchTest("judges a change the watch never reacts to once the quiet window has passed", async (agent) => {
     const repo = watched(agent);
     await agent.prompt(repo);
@@ -620,7 +636,8 @@ describe("a gate that keeps a watch", { concurrency: true }, () => {
     writeFileSync(join(repo, "unused", "b.ts"), "broken");
     const started = performance.now();
     const stopped = await agent.stop(repo);
-    assert.ok(performance.now() - started < 5000);
+    // No cycle starts, so the stop waits the 5 s the engine gives a watch to see a change, and no longer.
+    assert.ok(performance.now() - started < 7000);
     assert.equal(stopped?.decision, undefined);
     assert.match(stripVTControlCharacters(stopped?.systemMessage ?? ""), /1\/1 gates green/);
   });

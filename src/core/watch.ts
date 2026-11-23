@@ -13,12 +13,16 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type Gate, isCompared, type Watch, type WatchedGate } from "./config.ts";
 import { addedLines, cleaned, commandOf, type Outcome, TOOL_ENV } from "./run.ts";
 
-// Settled once nothing moved for this long: the watchers of the tools debounce a change by a few hundred ms.
+// Once a cycle closes, the lines a watch prints after it, such as the errors of a failed build, come within this long.
 const QUIET_MS = 1000;
+// A change no cycle started after in this long is one the watch does not look at, such as a spec its build leaves out:
+// it cannot change the last cycle, which then judges the turn.
+const UNSEEN_MS = 5000;
 const POLL_MS = 100;
 // What a watch that stopped leaves the agent: enough to see the error, not the whole history of the session.
 const LAST_LINES = 20;
@@ -112,7 +116,14 @@ function launch(folder: string, root: string, watch: Watch): void {
   const [name = "", ...args] = watch.run;
   const command = commandOf(root, name);
   const supervisor = commandOf(root, "{engine}/src/core/watch.ts");
-  const watched = [join(folder, "activity"), String(idleMs()), command.file, ...command.args, ...args];
+  const watched = [
+    join(folder, "activity"),
+    String(idleMs()),
+    watch.cycleStart,
+    command.file,
+    ...command.args,
+    ...args,
+  ];
   const log = openSync(join(folder, "output.log"), "w");
   const child = spawn(supervisor.file, [...supervisor.args, ...watched], {
     cwd: root,
@@ -191,9 +202,12 @@ async function settle(
         stopped: last ? `The watch stopped. Its last lines:\n${last}` : "The watch stopped, with no output.",
       };
     }
-    const moved = Math.max(changedAt(log), ...files.map((file) => changedAt(join(root, file))));
+    // A cycle that started after the last change read it, however long the watch took to see it.
+    const changed = Math.max(0, ...files.map((file) => changedAt(join(root, file))));
+    const seen = changedAt(join(folder, "cycle")) >= changed || Date.now() - changed >= UNSEEN_MS;
     const cycle = lastCycle(printed, gate.watch);
-    if (!cycle.open && Date.now() - moved >= QUIET_MS) return { ms, cycle: cleaned(root, cycle.lines.join("\n")) };
+    if (seen && !cycle.open && Date.now() - changedAt(log) >= QUIET_MS)
+      return { ms, cycle: cleaned(root, cycle.lines.join("\n")) };
     if (ms >= limitMs) return { ms, timedOut: true };
     await sleep(POLL_MS);
   }
@@ -262,13 +276,24 @@ function stop(folder: string): void {
  * the idle delay. Started detached, it leads a process group of its own, so stopping the group stops the watch and
  * the tools under it.
  */
-function supervise(activity: string, idle: number, file: string, args: string[]): void {
-  const watch = spawn(file, args, { stdio: ["ignore", "inherit", "inherit"] });
+function supervise(activity: string, idle: number, cycleStart: string, file: string, args: string[]): void {
+  // The time the last cycle started, which the stop compares with the changes of the turn. The start opens the first.
+  const cycle = join(dirname(activity), "cycle");
+  const opens = new RegExp(cycleStart);
+  writeFileSync(cycle, "");
+  const watch = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"] });
+  const forward = (line: string) => {
+    // Printed before the time is kept, so a stop that sees the time also finds the cycle in the output.
+    console.log(line);
+    if (opens.test(line)) writeFileSync(cycle, "");
+  };
+  createInterface({ input: watch.stdout }).on("line", forward);
+  createInterface({ input: watch.stderr }).on("line", forward);
   watch.on("error", (error) => {
     console.log(error.message);
     process.exit(1);
   });
-  watch.on("exit", (code) => process.exit(code ?? 1));
+  watch.on("close", (code) => process.exit(code ?? 1));
   setInterval(
     () => {
       if (Date.now() - changedAt(activity) < idle) return;
@@ -280,6 +305,6 @@ function supervise(activity: string, idle: number, file: string, args: string[])
 }
 
 if (import.meta.main) {
-  const [activity = "", idle = "", file = "", ...args] = process.argv.slice(2);
-  supervise(activity, Number(idle), file, args);
+  const [activity = "", idle = "", cycleStart = "", file = "", ...args] = process.argv.slice(2);
+  supervise(activity, Number(idle), cycleStart, file, args);
 }

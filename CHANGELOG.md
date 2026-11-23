@@ -4,7 +4,7 @@
 
 ### Added
 
-- `watch` on a gate: a long-running command, such as a test or build watch, that the engine keeps warm between turns, one per repo and gate, shared by the sessions of the repo. At the stop, it waits for the watch to settle, then judges the turn on its last cycle. The watch stops when the last session using it ends, or after 30 minutes without a prompt nor a stop. `check`, so CI, runs the gate's own `run` once
+- `watch` on a gate: a long-running command, such as a test or build watch, that the engine keeps warm between turns, one per repo and gate, shared by the sessions of the repo. At the stop, it waits for a cycle that started after the last change of the turn, so one that read it however long the watch took to see it, and judges the turn on that cycle once it closes. The watch stops when the last session using it ends, or after 30 minutes without a prompt nor a stop. `check`, so CI, runs the gate's own `run` once
 - A gate that keeps a watch and has `compare` fails only on the lines its last cycle added to the cycle the turn started on
 - A `SessionEnd` hook, which stops the watches a session was the last to use
 - An Angular catalog: `tests` runs `ng test` with Vitest in a watch and reports every red spec, the ones a change did not rerun included; `build` runs `ng build` in a watch, which type-checks every template, those of a component no spec reaches included; `template-lint` runs angular-eslint on the changed templates
