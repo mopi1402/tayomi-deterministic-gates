@@ -8,6 +8,8 @@
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "strict": true,
+    "strictNullChecks": false,
+    "strictPropertyInitialization": false,
     "skipLibCheck": true
   },
   "include": ["src"]

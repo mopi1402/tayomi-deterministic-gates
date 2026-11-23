@@ -5,7 +5,7 @@ import { configuredRoot } from "./core/config.ts";
 import { messageOf } from "./core/json.ts";
 import { broken, reports, summary } from "./core/report.ts";
 import { failed } from "./core/run.ts";
-import { handleHook } from "./hook/hook.ts";
+import { HOOK_EVENTS, handleHook, isHookEvent } from "./hook/hook.ts";
 
 function readStdin(): string {
   try {
@@ -16,7 +16,7 @@ function readStdin(): string {
 }
 
 /** What the command prints when it is called with words it does not know, named by the bin of the npm package. */
-export const USAGE = "Usage: deterministic-gates check, or deterministic-gates hook <session-start|turn-start|check>";
+export const USAGE = `Usage: deterministic-gates check, or deterministic-gates hook <${HOOK_EVENTS.join("|")}>`;
 
 // The helpers of the engine run only on import.meta.main, which came with Node 24.2: below, they are a silent green.
 const [major = 0, minor = 0] = process.versions.node.split(".").map(Number);
@@ -32,7 +32,7 @@ async function main([command, event]: string[]): Promise<void> {
       console.error(oldNode);
       process.exitCode = 2;
     }
-  } else if (command === "hook" && (event === "session-start" || event === "turn-start" || event === "check")) {
+  } else if (command === "hook" && isHookEvent(event)) {
     const output = await handleHook(event, readStdin());
     if (output) console.log(JSON.stringify(output));
   } else if (command === "check" && event === undefined) {

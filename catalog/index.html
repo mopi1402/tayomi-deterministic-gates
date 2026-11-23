@@ -40,8 +40,92 @@ summary { cursor: pointer; color: var(--muted); }
 <h1>Gate catalog</h1>
 <p>The gates worth copying into a repo. Nothing here runs by itself: the engine reads only the repo's <code>.gates.json</code>. Copy the definition of a gate there, install what it requires, and adapt its <code>files</code> to the layout of the repo.</p>
 <p>Generated from <code>catalog/*.json</code> by <code>pnpm catalog</code>: edit those files, never this page.</p>
-<nav><a href="#go">Go (6)</a><a href="#python">Python (3)</a><a href="#typescript">TypeScript (8)</a></nav>
+<nav><a href="#angular">Angular (3)</a><a href="#go">Go (6)</a><a href="#python">Python (3)</a><a href="#typescript">TypeScript (9)</a></nav>
 </header>
+<section id="angular">
+<h2>Angular</h2>
+<p>Gates for an Angular project tested with Vitest through the Angular builder, ng test. Each tool comes from the repo's node_modules, so its version is the one the lockfile pins.</p>
+<article id="angular/tests">
+<h3><code>angular/tests</code></h3>
+<p>Runs the unit tests in a watch kept warm between turns, since ng test builds the whole application before a single test runs. At the stop, it waits for the watch to finish with the turn's changes, then fails on a build that does not compile, and on every red spec, the ones the change did not rerun included. The whole check runs ng test once, without a watch.</p>
+<dl>
+<dt>Runs</dt><dd><code>@angular/cli test --watch=false</code></dd>
+<dt>When the turn changes</dt><dd><code>\.(ts|html|css)$</code></dd>
+<dt>Requires</dt><dd><ul><li><code>@angular/cli</code>: npm install --save-dev @angular/cli</li><li><code>@angular/build</code>: npm install --save-dev @angular/build</li><li><code>vitest</code>: npm install --save-dev vitest</li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;tests&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;\\.(ts|html|css)$&quot;,
+  &quot;run&quot;: [
+    &quot;@angular/cli&quot;,
+    &quot;test&quot;,
+    &quot;--watch=false&quot;
+  ],
+  &quot;watch&quot;: {
+    &quot;run&quot;: [
+      &quot;{engine}/src/helpers/angular-watch.ts&quot;
+    ],
+    &quot;cycleStart&quot;: &quot;Changes detected\\. Rebuilding&quot;,
+    &quot;cycleEnd&quot;: &quot;Test run finished with success|bundle generation failed&quot;,
+    &quot;failed&quot;: &quot;^FAIL |bundle generation failed&quot;
+  }
+}</code></pre></details>
+</article>
+<article id="angular/build">
+<h3><code>angular/build</code></h3>
+<p>Builds the application in a watch kept warm between turns, which type-checks every template, the ones of a component no spec reaches included: tsc alone never reads a template. At the stop, it fails on a build that does not compile, with the file and line of each error. Built without optimization into node_modules/.cache, so the dist of the project stays as it is. The whole check builds once, without a watch.</p>
+<dl>
+<dt>Runs</dt><dd><code>@angular/cli build --optimization=false --output-path=node_modules/.cache/gates/build</code></dd>
+<dt>When the turn changes</dt><dd><code>\.(ts|html|css|scss|sass|less)$</code></dd>
+<dt>Requires</dt><dd><ul><li><code>@angular/cli</code>: npm install --save-dev @angular/cli</li><li><code>@angular/build</code>: npm install --save-dev @angular/build</li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;build&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;\\.(ts|html|css|scss|sass|less)$&quot;,
+  &quot;run&quot;: [
+    &quot;@angular/cli&quot;,
+    &quot;build&quot;,
+    &quot;--optimization=false&quot;,
+    &quot;--output-path=node_modules/.cache/gates/build&quot;
+  ],
+  &quot;watch&quot;: {
+    &quot;run&quot;: [
+      &quot;@angular/cli&quot;,
+      &quot;build&quot;,
+      &quot;--watch&quot;,
+      &quot;--optimization=false&quot;,
+      &quot;--output-path=node_modules/.cache/gates/build&quot;
+    ],
+    &quot;cycleStart&quot;: &quot;Changes detected\\. Rebuilding&quot;,
+    &quot;cycleEnd&quot;: &quot;Application bundle generation (complete|failed)&quot;,
+    &quot;failed&quot;: &quot;Application bundle generation failed&quot;
+  }
+}</code></pre></details>
+</article>
+<article id="angular/template-lint">
+<h3><code>angular/template-lint</code></h3>
+<p>Lints the changed templates with angular-eslint, warnings included: the lint of the TypeScript catalog reads no .html file. It needs an ESLint config that gives .html files to angular-eslint, such as its templateRecommended and templateAccessibility configs.</p>
+<dl>
+<dt>Runs</dt><dd><code>eslint --max-warnings 0 --no-warn-ignored {files}</code></dd>
+<dt>When the turn changes</dt><dd><code>\.html$</code></dd>
+<dt>Requires</dt><dd><ul><li><code>eslint</code>: npm install --save-dev eslint</li><li><code>angular-eslint</code>: npm install --save-dev angular-eslint</li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;template-lint&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;\\.html$&quot;,
+  &quot;run&quot;: [
+    &quot;eslint&quot;,
+    &quot;--max-warnings&quot;,
+    &quot;0&quot;,
+    &quot;--no-warn-ignored&quot;,
+    &quot;{files}&quot;
+  ]
+}</code></pre></details>
+</article>
+</section>
 <section id="go">
 <h2>Go</h2>
 <p>Gates for a Go module. The toolchain comes from the PATH. The first build of a cold cache is slow, which is why these gates allow 60 seconds.</p>
@@ -348,6 +432,36 @@ summary { cursor: pointer; color: var(--muted); }
     &quot;{engine}/src/helpers/new-clones.ts&quot;,
     &quot;{turn}&quot;
   ]
+}</code></pre></details>
+</article>
+<article id="typescript/no-new-strict-errors">
+<h3><code>typescript/no-new-strict-errors</code></h3>
+<p>Type-checks the project with strictNullChecks and strictPropertyInitialization on, and fails only on the errors the turn added: a project that turned them off, with more errors than it can fix at once, stops growing new ones. An error is told by its file, code and message, so one a change moves to another line is not new. tsc keeps watching between turns; without the watch, it runs at each prompt and stop instead. Give -p and a tsconfig when tsconfig.json only references others, as in an Angular project. The whole check counts every error.</p>
+<dl>
+<dt>Runs</dt><dd><code>{engine}/src/helpers/type-errors.ts --strictNullChecks --strictPropertyInitialization</code></dd>
+<dt>When the turn changes</dt><dd><code>(\.(ts|tsx)|^tsconfig.*\.json)$</code></dd>
+<dt>Fails on</dt><dd>only the output lines the turn added</dd><dt>Requires</dt><dd><ul><li><code>typescript</code>: npm install --save-dev typescript</li></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;no-new-strict-errors&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;(\\.(ts|tsx)|^tsconfig.*\\.json)$&quot;,
+  &quot;run&quot;: [
+    &quot;{engine}/src/helpers/type-errors.ts&quot;,
+    &quot;--strictNullChecks&quot;,
+    &quot;--strictPropertyInitialization&quot;
+  ],
+  &quot;compare&quot;: &quot;turn-start&quot;,
+  &quot;watch&quot;: {
+    &quot;run&quot;: [
+      &quot;{engine}/src/helpers/type-errors.ts&quot;,
+      &quot;--watch&quot;,
+      &quot;--strictNullChecks&quot;,
+      &quot;--strictPropertyInitialization&quot;
+    ],
+    &quot;cycleStart&quot;: &quot;^Type check started$&quot;,
+    &quot;cycleEnd&quot;: &quot;^Type check done$&quot;
+  }
 }</code></pre></details>
 </article>
 <article id="typescript/no-new-dead-code">

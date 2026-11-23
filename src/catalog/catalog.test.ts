@@ -12,11 +12,11 @@ const ENTRY = {
 const catalog = (gates: unknown[]) => JSON.stringify({ title: "Python", description: "Python files.", gates });
 
 describe("the catalog", () => {
-  test("ships TypeScript, Go and Python, and every entry is a gate the engine accepts", () => {
+  test("ships Angular, TypeScript, Go and Python, and every entry is a gate the engine accepts", () => {
     const catalogs = readCatalogs(CATALOG_DIR);
     assert.deepEqual(
       catalogs.map(({ id }) => id),
-      ["go", "python", "typescript"],
+      ["angular", "go", "python", "typescript"],
     );
     assert.ok(catalogs.every(({ entries }) => entries.length > 0));
   });

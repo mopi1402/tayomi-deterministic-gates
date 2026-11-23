@@ -37,7 +37,7 @@ codex plugin marketplace add mopi1402/tayomi-deterministic-gates
 codex plugin add deterministic-gates@tayomi-deterministic-gates
 ```
 
-Codex runs no hook you have not reviewed: in a session, open `/hooks` and trust the three hooks of the plugin. A plugin update that changes a script asks for a new review.
+Codex runs no hook you have not reviewed: in a session, open `/hooks` and trust the four hooks of the plugin. A plugin update that changes a script asks for a new review.
 
 ## Configure the gates
 

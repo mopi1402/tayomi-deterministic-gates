@@ -1,8 +1,9 @@
-import { type CheckedTurn, checkTurn, startTurn } from "../core/check.ts";
+import { type CheckedTurn, checkTurn, startSession, startTurn } from "../core/check.ts";
 import { configuredRoot, gatesOf } from "../core/config.ts";
 import { isRecord, messageOf, parseJson } from "../core/json.ts";
 import { broken, failures, summary, toolsMissing, toolsToInstall } from "../core/report.ts";
 import { type Judged, judge, waivesOf } from "../core/send-back.ts";
+import { endSession } from "../core/watch.ts";
 import { forgetTold, forgetTurn, readTurn, tellOnce, turnRoot, writeTurn } from "../core/turn-state.ts";
 
 export interface HookInput {
@@ -20,7 +21,14 @@ export interface HookOutput {
   hookSpecificOutput?: { hookEventName: "UserPromptSubmit"; additionalContext: string };
 }
 
-export type HookEvent = "session-start" | "turn-start" | "check";
+/** The events the plugin hooks, each named as the CLI takes it. */
+export const HOOK_EVENTS = ["session-start", "turn-start", "check", "session-end"] as const;
+
+export type HookEvent = (typeof HOOK_EVENTS)[number];
+
+export function isHookEvent(word: string | undefined): word is HookEvent {
+  return HOOK_EVENTS.some((event) => event === word);
+}
 
 export function parseHookInput(text: string): HookInput {
   const input = parseJson(text);
@@ -74,6 +82,17 @@ export function stopOutput(turn: CheckedTurn, judged: Judged): HookOutput {
 // show them a stack trace at best, and the agent is not to blame.
 function cannotRun(error: unknown): HookOutput {
   return { systemMessage: broken(messageOf(error)) };
+}
+
+/**
+ * A session that starts starts the watches of its repo. Whatever stops them is told at the prompt, which reads the
+ * same gates.
+ */
+function sessionHook(session: string, cwd: string): void {
+  try {
+    const root = configuredRoot(cwd);
+    if (root !== undefined) startSession(session, root);
+  } catch {}
 }
 
 /**
@@ -138,6 +157,12 @@ export async function handleHook(event: HookEvent, text: string): Promise<HookOu
   // A session that starts, resumes or is cleared asks again for the missing tools; a compaction goes on as it was.
   if (event === "session-start") {
     if (source !== "compact") forgetTold(session);
+    sessionHook(session, cwd);
+    return undefined;
+  }
+  // Codex gives a session that ends 3 s at most: the hook only stops the watches no other session uses.
+  if (event === "session-end") {
+    endSession(session);
     return undefined;
   }
   return event === "turn-start" ? promptHook(session, cwd) : stopHook(session, cwd, retry, message);

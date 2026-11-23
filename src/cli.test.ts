@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { rmSync, writeFileSync } from "node:fs";
+import { existsSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { stripVTControlCharacters } from "node:util";
@@ -49,6 +49,18 @@ describe("check", () => {
     const { status, stdout } = cli(["check"]);
     assert.equal(status, 0);
     assert.match(stdout, /1\/1 gates green/);
+  });
+
+  test("runs the one-shot command of a gate that keeps a watch, and starts no watch", () => {
+    writeFileSync(join(repo, "once.mjs"), 'console.log("a problem, once"); process.exit(1)');
+    writeFileSync(join(repo, "watch.mjs"), 'import { writeFileSync } from "node:fs"; writeFileSync("watched", "")');
+    writeFileSync(join(repo, "a.ts"), "1");
+    const watch = { run: ["watch.mjs"], cycleStart: "^rebuilding$", cycleEnd: "^done$", failed: "^FAIL " };
+    writeGates(repo, { name: "tests", severity: "error", files: "\\.ts$", run: ["once.mjs"], watch });
+    const { status, stdout } = cli(["check"]);
+    assert.equal(status, 1);
+    assert.match(stdout, /## tests\na problem, once/);
+    assert.equal(existsSync(join(repo, "watched")), false);
   });
 
   test("says so outside git, and exits with 2", () => {

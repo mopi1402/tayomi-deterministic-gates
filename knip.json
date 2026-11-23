@@ -1,7 +1,22 @@
 {
   "ignoreDependencies": ["jscpd"],
   "workspaces": {
-    ".": { "entry": ["src/cli.ts", "hooks/register.ts"], "ignoreDependencies": ["claude-code"] },
-    "integration/typescript": { "ignoreDependencies": ["jscpd", "prettier"] }
+    ".": {
+      "entry": [
+        "src/cli.ts",
+        "src/core/watch.ts",
+        "src/helpers/angular-watch.ts",
+        "src/helpers/type-errors.ts",
+        "src/helpers/vitest-state-reporter.ts",
+        "hooks/register.ts"
+      ],
+      "ignoreDependencies": ["claude-code"]
+    },
+    "integration/typescript": {
+      "ignoreDependencies": ["jscpd", "prettier"]
+    },
+    "integration/angular": {
+      "ignoreDependencies": ["@angular/cli"]
+    }
   }
 }

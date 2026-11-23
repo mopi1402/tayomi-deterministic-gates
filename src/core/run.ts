@@ -21,6 +21,8 @@ export function failed(outcome: Outcome): boolean {
 }
 
 const ENGINE = resolve(import.meta.dirname, "..", "..");
+/** What a tool runs with: no colour, which some tools print anyway. */
+export const TOOL_ENV = { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" };
 const MAX_OUTPUT_MB = 16;
 const ENGINE_PREFIX = "{engine}/";
 
@@ -97,18 +99,22 @@ function executable(file: string): boolean {
   });
 }
 
-/**
- * Why the program of a gate cannot run on this machine, or nothing when it can: looked up as the gate would start it,
- * without starting it. A command the engine cannot resolve is left to the run, which reports it.
- */
-export function missingTool(root: string, gate: Gate): string | undefined {
+function missingProgram(root: string, name: string): string | undefined {
   let command: Command;
   try {
-    command = commandOf(root, gate.run[0] ?? "");
+    command = commandOf(root, name);
   } catch {
     return undefined;
   }
   return command.missing && !executable(command.file) ? command.missing : undefined;
+}
+
+/**
+ * Why the program of a gate, or of its watch, cannot run on this machine, or nothing when they can: looked up as the
+ * gate would start it, without starting it. A command the engine cannot resolve is left to the run, which reports it.
+ */
+export function missingTool(root: string, gate: Gate): string | undefined {
+  return missingProgram(root, gate.run[0] ?? "") ?? (gate.watch && missingProgram(root, gate.watch.run[0] ?? ""));
 }
 
 export function argumentsOf(gate: Gate, files: string[], turn: string): string[] {
@@ -159,7 +165,7 @@ async function execute(root: string, gate: Gate, args: string[]): Promise<Execut
         cwd: root,
         timeout: gate.timeoutSeconds * 1000,
         maxBuffer: MAX_OUTPUT_MB * 1024 * 1024,
-        env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
+        env: TOOL_ENV,
       },
       (error, stdout, stderr) => {
         resolve({
@@ -185,10 +191,14 @@ function outputOf(
   if (error?.killed === true)
     return `Out of time after ${gate.timeoutSeconds} s, so not judged. Make it faster, or move it to CI.`;
   if (error?.code === "ENOENT") return command.missing;
-  // Some tools colour despite NO_COLOR, and absolute paths only cost the agent tokens.
-  const said = stripVTControlCharacters(printed).split(`${root}${sep}`).join("").trim();
+  const said = cleaned(root, printed);
   if (said || !error) return said;
   return `exit code ${String(error.code)}, no output`;
+}
+
+/** What a tool printed, for the agent: some tools colour despite NO_COLOR, and absolute paths only cost it tokens. */
+export function cleaned(root: string, printed: string): string {
+  return stripVTControlCharacters(printed).split(`${root}${sep}`).join("").trim();
 }
 
 /** Runs a compared gate on the whole project, as the turn starts. */
@@ -211,7 +221,15 @@ export async function check(
   const ran = { name: gate.name, ms, report: ok ? output : undefined };
   if (timedOut) return { ...ran, ok, output, timedOut };
   if (!isCompared(gate) || !ok) return { ...ran, ok, output };
-  if (baseline === undefined) return { ...ran, ok: true, output: "" };
+  return { ...ran, ...addedLines(gate, output, baseline) };
+}
+
+/**
+ * Judges the output of a compared gate that ran clean: it fails on the lines the turn added to the report of the turn
+ * start. Without that report, nothing counts but the exit code.
+ */
+export function addedLines(gate: Gate, output: string, baseline: string | undefined): { ok: boolean; output: string } {
+  if (baseline === undefined) return { ok: true, output: "" };
   const added = newLines(baseline, output, gate.ignoreLines);
-  return { ...ran, ok: added.length === 0, output: added.join("\n") };
+  return { ok: added.length === 0, output: added.join("\n") };
 }

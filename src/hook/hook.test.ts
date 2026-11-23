@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { stripVTControlCharacters } from "node:util";
 import { judge } from "../core/send-back.ts";
 import { git, outcome, ran, tempRepo } from "../testing.ts";
-import { handleHook, parseHookInput, stopOutput } from "./hook.ts";
+import { handleHook, type HookOutput, parseHookInput, stopOutput } from "./hook.ts";
+
+const CLI = join(import.meta.dirname, "..", "cli.ts");
 
 const FAILING_GATE = JSON.stringify({
   gates: [{ name: "fail", severity: "error", files: "\\.ts$", run: ["false"] }],
@@ -49,6 +52,7 @@ function session() {
     prompt: (cwd: string) => handleHook("turn-start", event("UserPromptSubmit", cwd, { prompt: "hi" })),
     stop: (cwd: string, retry = false, said = "") =>
       handleHook("check", event("Stop", cwd, { stop_hook_active: retry, last_assistant_message: said })),
+    end: (cwd: string) => handleHook("session-end", event("SessionEnd", cwd, { reason: "other" })),
     cleanup: () => {
       for (const path of folders) rmSync(path, { recursive: true, force: true });
     },
@@ -400,4 +404,394 @@ describe("handleHook", () => {
     writeFileSync(join(interrupted, ".gates.json"), "{");
     assert.match((await agent.prompt(interrupted))?.systemMessage ?? "", /could not run/);
   });
+});
+
+// A gate that keeps a watch: each test has a session of its own, so the tests run side by side.
+type Agent = ReturnType<typeof session>;
+
+// A watch of the .ts files of its folder: each change opens a cycle that prints a FAIL line per file holding
+// "broken", and a build failure with its errors after it for a file holding "syntax". It exits on a file holding
+// "crash", and goes when its repo does. Given a file, it writes there when it starts and when it is stopped.
+const WATCH = [
+  'import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";',
+  'if (process.argv[2]) appendFileSync(process.argv[2], "started\\n");',
+  'process.on("SIGTERM", () => {',
+  '  if (process.argv[2]) appendFileSync(process.argv[2], "stopped\\n");',
+  "  process.exit(0);",
+  "});",
+  'const sources = () => readdirSync(".").filter((file) => file.endsWith(".ts")).sort();',
+  'const state = () => sources().map((file) => `${file}:${statSync(file).mtimeMs}`).join("|");',
+  "const cycle = () => {",
+  '  const texts = sources().map((file) => [file, readFileSync(file, "utf8")]);',
+  '  const syntax = texts.filter(([, text]) => text.includes("syntax"));',
+  "  if (syntax.length) {",
+  '    console.log("build failed");',
+  "    for (const [file] of syntax) console.log(`error: ${file}`);",
+  "    return;",
+  "  }",
+  "  for (const [file, text] of texts)",
+  '    if (text.includes("crash")) {',
+  "      console.log(`crashing on ${file}`);",
+  "      process.exit(1);",
+  "    }",
+  '  for (const [file, text] of texts) if (text.includes("broken")) console.log(`FAIL ${file}`);',
+  '  console.log("done");',
+  "};",
+  "let seen = state();",
+  "cycle();",
+  "setInterval(() => {",
+  '  if (!existsSync(".git")) process.exit(0);',
+  "  const now = state();",
+  "  if (now === seen) return;",
+  "  seen = now;",
+  '  console.log("rebuilding");',
+  "  setTimeout(cycle, 100);",
+  "}, 300);",
+].join("\n");
+
+const gate = (watchRun: string[] = ["watch.mjs"], watch: object = {}) => ({
+  name: "tests",
+  severity: "error",
+  files: "\\.ts$",
+  run: ["fail.mjs"],
+  watch: {
+    run: watchRun,
+    cycleStart: "^rebuilding$",
+    cycleEnd: "^done$|^build failed$",
+    failed: "^FAIL |^build failed$",
+    ...watch,
+  },
+});
+
+function watched(agent: Agent, entry: object = gate()): string {
+  const repo = agent.repo(JSON.stringify({ gates: [entry] }));
+  writeFileSync(join(repo, "watch.mjs"), WATCH);
+  return repo;
+}
+
+// The agent sent back by the watch gate, with the failure of the file in the last cycle.
+function assertSentBackFor(stopped: HookOutput | undefined, file: string): void {
+  assert.equal(stopped?.decision, "block");
+  assert.match(stopped?.reason ?? "", new RegExp(`^## tests\\nFAIL ${file.replace(".", "\\.")}$`, "m"));
+}
+
+// Runs with the idle delay of the watches shortened to the given milliseconds.
+async function idleAfter(ms: number, run: () => Promise<void>): Promise<void> {
+  process.env.GATES_WATCH_IDLE_MS = String(ms);
+  try {
+    await run();
+  } finally {
+    delete process.env.GATES_WATCH_IDLE_MS;
+  }
+}
+
+// A repo whose session started 1.2 s ago, with a watch that writes its life in events.log.
+async function startedAWhileAgo(agent: Agent): Promise<string> {
+  const repo = watched(agent, gate(["watch.mjs", "events.log"]));
+  await agent.start(repo, "startup");
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  return repo;
+}
+
+// A compared watch: no failed pattern, it fails on the lines its last cycle added to the one the turn started on.
+const compared = () => ({ ...gate(undefined, { failed: undefined }), compare: "turn-start" });
+
+// What the watch of the repo wrote of its life, once it wrote that many lines, and a while after for any other.
+async function events(repo: string, lines: number): Promise<string[]> {
+  const file = join(repo, "events.log");
+  const read = () => (existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean) : []);
+  for (let waited = 0; waited < 3000 && read().length < lines; waited += 50)
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  await new Promise((resolve) => setTimeout(resolve, 500));
+  return read();
+}
+
+function watchTest(name: string, run: (agent: Agent) => Promise<void>): void {
+  test(name, async () => {
+    const agent = session();
+    try {
+      await run(agent);
+    } finally {
+      agent.cleanup();
+    }
+  });
+}
+
+describe("a gate that keeps a watch", { concurrency: true }, () => {
+  watchTest(
+    "sends the agent back with the failing lines of the last cycle of the watch the prompt started",
+    async (agent) => {
+      const repo = watched(agent);
+      await agent.prompt(repo);
+      writeFileSync(join(repo, "a.ts"), "broken");
+      const stopped = await agent.stop(repo);
+      assertSentBackFor(stopped, "a.ts");
+    },
+  );
+
+  watchTest("starts the watch at the stop when no hook started it, and judges the turn on it", async (agent) => {
+    const repo = watched(agent);
+    writeFileSync(join(repo, "a.ts"), "broken");
+    const stopped = await agent.stop(repo);
+    assertSentBackFor(stopped, "a.ts");
+  });
+
+  watchTest("passes a turn that fixes the failure, judged on the last cycle alone", async (agent) => {
+    const repo = watched(agent);
+    await agent.prompt(repo);
+    writeFileSync(join(repo, "a.ts"), "broken");
+    await agent.stop(repo);
+    await agent.prompt(repo);
+    writeFileSync(join(repo, "a.ts"), "fixed");
+    const stopped = await agent.stop(repo);
+    assert.equal(stopped?.decision, undefined);
+    assert.match(stripVTControlCharacters(stopped?.systemMessage ?? ""), /1\/1 gates green/);
+  });
+
+  watchTest("sends the agent back with only the lines a compared watch added since the turn started", async (agent) => {
+    const repo = watched(agent, compared());
+    writeFileSync(join(repo, "old.ts"), "broken");
+    await agent.prompt(repo);
+    writeFileSync(join(repo, "a.ts"), "broken");
+    const stopped = await agent.stop(repo);
+    assertSentBackFor(stopped, "a.ts");
+    assert.doesNotMatch(stopped?.reason ?? "", /old\.ts/);
+  });
+
+  watchTest("passes a turn whose compared watch prints only the failures the turn started with", async (agent) => {
+    const repo = watched(agent, compared());
+    writeFileSync(join(repo, "old.ts"), "broken");
+    await agent.prompt(repo);
+    writeFileSync(join(repo, "a.ts"), "fine");
+    const stopped = await agent.stop(repo);
+    assert.equal(stopped?.decision, undefined);
+    const shown = stripVTControlCharacters(stopped?.systemMessage ?? "");
+    assert.match(shown, /1\/1 gates green/);
+    assert.doesNotMatch(shown, /not compared/);
+  });
+
+  watchTest(
+    "sends the agent back with the lines a failed build prints after the line that ends its cycle",
+    async (agent) => {
+      const repo = watched(agent);
+      await agent.prompt(repo);
+      writeFileSync(join(repo, "a.ts"), "syntax");
+      const stopped = await agent.stop(repo);
+      assert.equal(stopped?.decision, "block");
+      assert.match(stopped?.reason ?? "", /^build failed\nerror: a\.ts$/m);
+    },
+  );
+
+  watchTest("skips the gate without waiting on the watch when the turn changes no file it looks at", async (agent) => {
+    const repo = watched(agent);
+    await agent.prompt(repo);
+    writeFileSync(join(repo, "notes.md"), "words");
+    const started = performance.now();
+    const stopped = await agent.stop(repo);
+    assert.ok(performance.now() - started < 1000);
+    assert.match(stripVTControlCharacters(stopped?.systemMessage ?? ""), /no gate looks at the 1 changed file/);
+  });
+
+  watchTest("leaves out a gate whose watch is wrong, says why, and still runs the others", async (agent) => {
+    for (const [entry, why] of [
+      [gate(["watch.mjs", "{files}"]), /tests not run, its entry is wrong: a watch outlives the turn/],
+      [gate(["watch.mjs", "--since={turn}"]), /tests not run, its entry is wrong: a watch outlives the turn/],
+      [gate(undefined, { failed: "(" }), /tests not run, its entry is wrong: watch\.failed is a regular expression/],
+      [gate(undefined, { cycleEnd: undefined }), /watch\.cycleEnd is a regular expression/],
+      [gate(undefined, { debounce: 1 }), /unknown field watch\.debounce/],
+      [{ ...gate(), compare: "turn-start" }, /a compared watch fails on the lines its cycle added: no watch\.failed/],
+    ] as const) {
+      const repo = agent.repo(
+        JSON.stringify({ gates: [entry, { name: "fail", severity: "error", files: "\\.ts$", run: ["false"] }] }),
+      );
+      await agent.prompt(repo);
+      writeFileSync(join(repo, "a.ts"), "broken");
+      const stopped = await agent.stop(repo);
+      assert.match(stopped?.reason ?? "", /^## fail$/m);
+      assert.match(stripVTControlCharacters(stopped?.systemMessage ?? ""), why);
+    }
+  });
+
+  watchTest("judges a change the watch never reacts to once the quiet window has passed", async (agent) => {
+    const repo = watched(agent);
+    await agent.prompt(repo);
+    // The fake watch only reads the .ts files at the root, as a build never reaches a file no test imports.
+    mkdirSync(join(repo, "unused"));
+    writeFileSync(join(repo, "unused", "b.ts"), "broken");
+    const started = performance.now();
+    const stopped = await agent.stop(repo);
+    assert.ok(performance.now() - started < 5000);
+    assert.equal(stopped?.decision, undefined);
+    assert.match(stripVTControlCharacters(stopped?.systemMessage ?? ""), /1\/1 gates green/);
+  });
+
+  watchTest(
+    "sends the agent back with the last lines of a watch that exited, and starts it again at the next prompt",
+    async (agent) => {
+      const repo = watched(agent);
+      await agent.prompt(repo);
+      writeFileSync(join(repo, "a.ts"), "crash");
+      const stopped = await agent.stop(repo);
+      assert.equal(stopped?.decision, "block");
+      assert.match(stopped?.reason ?? "", /^## tests\nThe watch stopped\. Its last lines:\n(.+\n)*crashing on a\.ts$/m);
+      writeFileSync(join(repo, "a.ts"), "fixed");
+      await agent.prompt(repo);
+      writeFileSync(join(repo, "b.ts"), "broken");
+      assert.match((await agent.stop(repo))?.reason ?? "", /^## tests\nFAIL b\.ts$/m);
+    },
+  );
+
+  watchTest("starts the watch as soon as the session starts", async (agent) => {
+    const repo = watched(agent, gate(["watch.mjs", "events.log"]));
+    assert.equal(await agent.start(repo, "startup"), undefined);
+    assert.deepEqual(await events(repo, 1), ["started"]);
+  });
+
+  watchTest("shares one watch between two sessions of the same repo", async (agent) => {
+    const repo = watched(agent, gate(["watch.mjs", "events.log"]));
+    const other = session();
+    try {
+      await agent.start(repo, "startup");
+      await agent.prompt(repo);
+      await other.start(repo, "startup");
+      await other.prompt(repo);
+      assert.deepEqual(await events(repo, 1), ["started"]);
+    } finally {
+      other.cleanup();
+    }
+  });
+
+  watchTest(
+    "stops the watch when the last session of its repo ends, and keeps it while another one uses it",
+    async (agent) => {
+      const repo = watched(agent, gate(["watch.mjs", "events.log"]));
+      const other = session();
+      try {
+        await agent.start(repo, "startup");
+        await other.prompt(repo);
+        assert.equal(await agent.end(repo), undefined);
+        assert.deepEqual(await events(repo, 2), ["started"]);
+        await other.end(repo);
+        assert.deepEqual(await events(repo, 2), ["started", "stopped"]);
+      } finally {
+        other.cleanup();
+      }
+    },
+  );
+
+  watchTest("asks to install a watch program this machine does not have, and leaves the gate off", async (agent) => {
+    const repo = watched(agent, gate(["no-such-watcher"]));
+    const asked = await agent.prompt(repo);
+    assert.match(asked?.hookSpecificOutput?.additionalContext ?? "", /- tests: no-such-watcher is not installed/);
+    writeFileSync(join(repo, "a.ts"), "broken");
+    const stopped = await agent.stop(repo);
+    assert.equal(stopped?.decision, undefined);
+    assert.match(
+      stripVTControlCharacters(stopped?.systemMessage ?? ""),
+      /tests not run: no-such-watcher is not installed/,
+    );
+  });
+
+  watchTest("starts one watch when two sessions start at the same instant, each in its own process", async (agent) => {
+    const repo = watched(agent, gate(["watch.mjs", "events.log"]));
+    const sessions = [`test-${randomUUID()}`, `test-${randomUUID()}`];
+    const hook = (id: string) =>
+      new Promise((resolve) => {
+        const child = spawn(process.execPath, [CLI, "hook", "session-start"], {
+          stdio: ["pipe", "ignore", "ignore"],
+        });
+        child.on("exit", resolve);
+        child.stdin.end(
+          JSON.stringify({ session_id: id, cwd: repo, hook_event_name: "SessionStart", source: "startup" }),
+        );
+      });
+    const end = (id: string) => handleHook("session-end", JSON.stringify({ session_id: id, cwd: repo }));
+    try {
+      await Promise.all(sessions.map(hook));
+      assert.deepEqual(await events(repo, 2), ["started"]);
+    } finally {
+      for (const id of sessions) await end(id);
+    }
+  });
+
+  watchTest(
+    "keeps every session of a watch that starts again, and stops it only when the last of them ends",
+    async (agent) => {
+      const repo = watched(agent, gate(["watch.mjs", "events.log"]));
+      const other = session();
+      try {
+        await agent.prompt(repo);
+        await other.prompt(repo);
+        writeFileSync(join(repo, "a.ts"), "crash");
+        await agent.stop(repo);
+        writeFileSync(join(repo, "a.ts"), "fixed");
+        await agent.prompt(repo);
+        assert.deepEqual(await events(repo, 2), ["started", "started"]);
+        await agent.end(repo);
+        assert.deepEqual(await events(repo, 3), ["started", "started"]);
+        await other.end(repo);
+        assert.deepEqual(await events(repo, 3), ["started", "started", "stopped"]);
+      } finally {
+        other.cleanup();
+      }
+    },
+  );
+
+  watchTest(
+    "shows out of time, without sending the agent back, a watch whose cycle is still open when time runs out",
+    async (agent) => {
+      const repo = watched(agent, { ...gate(undefined, { cycleEnd: "^never$" }), timeoutSeconds: 2 });
+      await agent.prompt(repo);
+      writeFileSync(join(repo, "a.ts"), "broken");
+      const stopped = await agent.stop(repo);
+      assert.equal(stopped?.decision, undefined);
+      assert.match(stripVTControlCharacters(stopped?.systemMessage ?? ""), /0\/1 gates green in .* · 1 out of time/);
+    },
+  );
+});
+
+// The idle delay is shortened through the environment, which every watch started meanwhile reads: one at a time.
+describe("a gate that keeps a watch, with a short idle delay", () => {
+  watchTest(
+    "stops the watch once its repo has had no prompt nor stop for the idle delay, and starts it at the next prompt",
+    async (agent) => {
+      await idleAfter(2000, async () => {
+        const repo = await startedAWhileAgo(agent);
+        await agent.prompt(repo);
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        // Longer than the delay since the session started, shorter since the prompt.
+        assert.deepEqual(await events(repo, 1), ["started"]);
+        assert.deepEqual(await events(repo, 2), ["started", "stopped"]);
+        await agent.prompt(repo);
+        assert.deepEqual(await events(repo, 3), ["started", "stopped", "started"]);
+      });
+    },
+  );
+
+  watchTest(
+    "counts a stop that skips the gate as activity, which keeps the watch from stopping for idleness",
+    async (agent) => {
+      await idleAfter(2000, async () => {
+        const repo = await startedAWhileAgo(agent);
+        writeFileSync(join(repo, "notes.md"), "words");
+        await agent.stop(repo);
+        await new Promise((resolve) => setTimeout(resolve, 800));
+        // Longer than the delay since the session started, shorter since the stop.
+        assert.deepEqual(await events(repo, 1), ["started"]);
+      });
+    },
+  );
+
+  watchTest(
+    "starts again at the stop a watch stopped for idleness during a long turn, and judges the turn on it",
+    async (agent) => {
+      await idleAfter(1000, async () => {
+        const repo = watched(agent, gate(["watch.mjs", "events.log"]));
+        await agent.prompt(repo);
+        assert.deepEqual(await events(repo, 2), ["started", "stopped"]);
+        writeFileSync(join(repo, "a.ts"), "broken");
+        assertSentBackFor(await agent.stop(repo), "a.ts");
+      });
+    },
+  );
 });

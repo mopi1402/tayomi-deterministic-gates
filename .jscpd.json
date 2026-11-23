@@ -1,4 +1,4 @@
 {
-  "ignore": ["catalog/index.html"],
+  "ignore": ["catalog/index.html", "pnpm-lock.yaml"],
   "ignorePattern": ["import .*"]
 }

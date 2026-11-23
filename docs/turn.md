@@ -52,6 +52,39 @@ A deleted file counts as changed, so a gate that reads the whole project runs on
 
 A gate runs from the root of the repo, with colour turned off. Its report is cut to the first and last lines past 4000 characters, with the root path left out.
 
+## The gates that keep a watch
+
+A gate that keeps a watch is judged on the watch instead of running:
+
+```mermaid
+flowchart TD
+    prompt[A prompt arrives] --> running{Its watch runs for this repo?}
+    running -- no --> launch[The engine starts it in the background]
+    running -- yes --> work
+    launch --> work[The agent works, the watch reruns on each change]
+    work --> stop[The agent stops after changing a file the gate looks at]
+    stop --> settled{No cycle open, and 1 s with no new output and no new change?}
+    settled -- not yet --> wait[The engine waits, within the time of the gate]
+    wait --> settled
+    settled -- yes --> last[The gate is judged on the last cycle of the watch]
+    wait -- the time runs out --> late[Out of time, neither green nor red]
+```
+
+A watch lives across turns and sessions:
+
+```mermaid
+flowchart TD
+    begin[A session starts, or a prompt arrives] --> runs{The watch of the repo runs?}
+    runs -- no --> launch[The engine starts it, and records the session]
+    runs -- yes --> join[The session is recorded as one more user of it]
+    launch --> life[It reruns on each change, in the background]
+    join --> life
+    life -- a session ends, others still use it --> life
+    life -- the last session that used it ends --> stopped[It stops, with every process it started]
+    life -- 30 minutes without a prompt nor a stop on the repo --> idle[It stops, and the next prompt or stop starts it again]
+    life -- it exits on its own --> dead[The next stop fails the gate with its last lines, the next prompt starts it again]
+```
+
 ## The compared gates
 
 A compared gate fails on the lines of output the turn added: the lines its start report does not hold as they are, so a problem that moves to another line or is reworded counts as new too. The lines stay new in the next turns until they are fixed: a report the agent leaves failing is not the next turn's baseline.
@@ -60,7 +93,7 @@ The command exits with 0 when it finds problems, as `knip --no-exit-code` or `go
 
 ## What the engine keeps
 
-The turn of each session and the last reports of each repo, in the temporary folder of the system. It writes nothing in the repo, and the folder is the system's to clean.
+The turn of each session, the last reports of each repo, and the process and output of each watch, in the temporary folder of the system. It writes nothing in the repo, and the folder is the system's to clean.
 
 ## What the lock covers
 

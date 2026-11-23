@@ -26,6 +26,7 @@ The gates of a repo live in `.gates.json` at its root, committed. Each one names
 | `compare`        | `turn-start`: the command runs on the whole project as the turn starts, and only the lines of output the turn added fail the gate. For a tool that exits with 0 when it finds problems. |
 | `ignoreLines`    | A regular expression for lines of output that never count as new, such as a header with a total.                                                                                        |
 | `timeoutSeconds` | Less time for this gate than the check has, never more.                                                                                                                                 |
+| `watch`          | A long-running command the gate keeps between turns, judged at the stop instead of `run`. See below.                                                                                    |
 
 ## How `run` finds its program
 
@@ -41,6 +42,40 @@ A tool the repo pins beats one on the `PATH`, so write the pinned form when ther
 In the arguments, `{files}` expands to the changed files the gate looks at, and `{turn}` to the commit that holds the tree as the turn started.
 
 A gate whose entry is wrong, such as with an unknown field, is left out and named in the summary, and the other gates still run.
+
+## A gate that keeps a watch
+
+Some tools cost too much to start at every stop, such as `ng test`, which builds the whole application before a single test runs. Their watch mode keeps the build warm and reruns only what a change touches. A gate can keep that watch:
+
+```json
+{
+  "name": "tests",
+  "severity": "error",
+  "files": "\\.ts$",
+  "run": ["my-runner", "test"],
+  "watch": {
+    "run": ["my-runner", "test", "--watch"],
+    "cycleStart": "^Change detected",
+    "cycleEnd": "^Tests done",
+    "failed": "^FAIL "
+  }
+}
+```
+
+| Field        | Meaning                                                                                                          |
+| ------------ | ---------------------------------------------------------------------------------------------------------------- |
+| `run`        | The watch command, found as a gate's `run` is. It outlives the turn, so it takes neither `{files}` nor `{turn}`. |
+| `cycleStart` | A regular expression on a line of output that opens a cycle: the watch reacting to a change.                     |
+| `cycleEnd`   | A regular expression on a line that closes the cycle.                                                            |
+| `failed`     | A regular expression on a line that makes the cycle fail. A compared gate takes none.                            |
+
+As a session starts or a prompt arrives, the engine starts the watch in the background when it does not run yet, one per repo and gate, shared by every session of the repo. It stops once the last session that used it ends, or after 30 minutes without a prompt nor a stop on its repo. A watch that stopped on its own fails the gate with the last lines it printed, and the next prompt starts it again. One that was never started, or that stopped for idleness during a long turn, starts at the stop, which waits for it. The start of the watch opens the first cycle, and a cycle holds every line printed since it opened, the lines after its closing line included, such as the errors a failed build prints after saying it failed.
+
+When the agent stops after changing a file the gate looks at, the engine waits until the watch has settled: no cycle open, and for 1 s neither new output nor a new change to a file of the turn that the gate looks at. It then judges the turn on the last cycle: red with its lines when one matches `failed`, green otherwise. A watch that does not settle within the time of the gate shows out of time.
+
+A gate with `compare` judges its watch the same way, on the lines added: at the prompt, the engine waits up to 45 s for the watch to settle and keeps its last cycle as the report of the turn start, and at the stop, the lines of the last cycle that report lacks fail the gate. The `no-new-strict-errors` gate of the TypeScript catalog does this with `tsc --watch`.
+
+`check`, so CI, never starts a watch: it runs the gate's own `run`, once.
 
 ## The settings of the whole check
 

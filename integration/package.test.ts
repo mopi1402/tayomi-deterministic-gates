@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -55,10 +55,15 @@ const GATES = JSON.stringify({
 });
 
 describe("the npm package", () => {
-  test("publishes its package.json as written: npm drops a bin it judges invalid at publish, never at pack", () => {
-    const { status, stderr } = spawnSync("npm", ["publish", "--dry-run"], { cwd: ENGINE, encoding: "utf8" });
-    assert.equal(status, 0, stderr);
-    assert.doesNotMatch(stderr, /auto-corrected/);
+  // npm rewrites at publish, never at pack, a field it judges wrong, as it dropped the bin of 0.4.0. npm pkg fix
+  // rewrites the same fields, offline and whatever the version: a publish --dry-run fails on a version already out.
+  test("ships its package.json as written, with nothing npm would correct at publish", () => {
+    const written = readFileSync(join(ENGINE, "package.json"), "utf8");
+    const copy = join(work, "manifest");
+    mkdirSync(copy);
+    writeFileSync(join(copy, "package.json"), written);
+    execFileSync("npm", ["pkg", "fix"], { cwd: copy, stdio: "ignore" });
+    assert.deepEqual(JSON.parse(readFileSync(join(copy, "package.json"), "utf8")), JSON.parse(written));
   });
 
   test("checks a repo through its bin, with a script of the engine", () => {

@@ -10,7 +10,8 @@ const LOCAL_GATES_FILE = ".gates.local.json";
 const DEFAULT_MAX_TIMEOUT_SECONDS = 45;
 // The times a turn sends the agent back: enough for a fix that breaks another gate, never a loop.
 const DEFAULT_MAX_SEND_BACKS = 5;
-const FIELDS = new Set(["name", "severity", "files", "run", "compare", "ignoreLines", "timeoutSeconds"]);
+const FIELDS = new Set(["name", "severity", "files", "run", "compare", "ignoreLines", "timeoutSeconds", "watch"]);
+const WATCH_FIELDS = new Set(["run", "cycleStart", "cycleEnd", "failed"]);
 
 /** In the arguments of a gate: the changed files it looks at, and the commit of the turn start. */
 export const FILES = "{files}";
@@ -24,6 +25,26 @@ export interface Gate {
   compare?: "turn-start";
   ignoreLines?: string;
   timeoutSeconds: number;
+  watch?: Watch;
+}
+
+/**
+ * A long-running command a gate keeps between turns, such as a test watch, with the patterns of its output that open
+ * a cycle, close one, and mark a failure. The gate's own run stays the one-shot command, for a check of the whole repo.
+ */
+export interface Watch {
+  run: string[];
+  cycleStart: string;
+  cycleEnd: string;
+  /** Absent on a compared gate, which fails on the lines the last cycle added to the one the turn started on. */
+  failed?: string;
+}
+
+/** A gate that keeps a watch. */
+export type WatchedGate = Gate & { watch: Watch };
+
+export function keepsWatch(gate: Gate): gate is WatchedGate {
+  return gate.watch !== undefined;
 }
 
 type Entry = Record<string, unknown> & { name: string };
@@ -113,8 +134,27 @@ function isPattern(value: unknown): value is string {
   }
 }
 
+function toWatch(watch: unknown, compared: boolean): Watch {
+  if (!isRecord(watch)) return refuse("watch holds run, cycleStart, cycleEnd and failed");
+  const unknown = Object.keys(watch).find((key) => !WATCH_FIELDS.has(key));
+  if (unknown !== undefined) refuse(`unknown field watch.${unknown}`);
+  const { run, cycleStart, cycleEnd, failed } = watch;
+  if (!isStringArray(run) || !run.length) refuse("watch.run is a non-empty list of strings");
+  if (run.some((argument) => argument.includes(FILES) || argument.includes(TURN)))
+    refuse(`a watch outlives the turn: its run takes neither ${FILES} nor ${TURN}`);
+  const pattern = (field: string, value: unknown): string =>
+    isPattern(value) ? value : refuse(`watch.${field} is a regular expression on a line of its output`);
+  if (compared && failed !== undefined) refuse("a compared watch fails on the lines its cycle added: no watch.failed");
+  return {
+    run,
+    cycleStart: pattern("cycleStart", cycleStart),
+    cycleEnd: pattern("cycleEnd", cycleEnd),
+    ...(compared ? {} : { failed: pattern("failed", failed) }),
+  };
+}
+
 function toGate(entry: Entry, maxTimeoutSeconds: number): Gate {
-  const { name, severity, files, run, compare, ignoreLines, timeoutSeconds = maxTimeoutSeconds } = entry;
+  const { name, severity, files, run, compare, ignoreLines, watch, timeoutSeconds = maxTimeoutSeconds } = entry;
   const unknown = Object.keys(entry).find((key) => !FIELDS.has(key));
   if (unknown !== undefined) refuse(`unknown field ${unknown}`);
   if (!/^[a-z][a-z0-9-]*$/.test(name)) refuse("a name is lowercase words joined by hyphens");
@@ -136,6 +176,7 @@ function toGate(entry: Entry, maxTimeoutSeconds: number): Gate {
     timeoutSeconds: Math.min(timeoutSeconds, maxTimeoutSeconds),
     ...(compare === undefined ? {} : { compare }),
     ...(ignoreLines === undefined ? {} : { ignoreLines }),
+    ...(watch === undefined ? {} : { watch: toWatch(watch, compare !== undefined) }),
   };
 }
 

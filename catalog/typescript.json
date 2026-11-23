@@ -95,6 +95,32 @@
       }
     },
     {
+      "description": "Type-checks the project with strictNullChecks and strictPropertyInitialization on, and fails only on the errors the turn added: a project that turned them off, with more errors than it can fix at once, stops growing new ones. An error is told by its file, code and message, so one a change moves to another line is not new. tsc keeps watching between turns; without the watch, it runs at each prompt and stop instead. Give -p and a tsconfig when tsconfig.json only references others, as in an Angular project. The whole check counts every error.",
+      "requires": [
+        {
+          "tool": "typescript",
+          "install": "npm install --save-dev typescript"
+        }
+      ],
+      "gate": {
+        "name": "no-new-strict-errors",
+        "severity": "error",
+        "files": "(\\.(ts|tsx)|^tsconfig.*\\.json)$",
+        "run": ["{engine}/src/helpers/type-errors.ts", "--strictNullChecks", "--strictPropertyInitialization"],
+        "compare": "turn-start",
+        "watch": {
+          "run": [
+            "{engine}/src/helpers/type-errors.ts",
+            "--watch",
+            "--strictNullChecks",
+            "--strictPropertyInitialization"
+          ],
+          "cycleStart": "^Type check started$",
+          "cycleEnd": "^Type check done$"
+        }
+      }
+    },
+    {
       "description": "Fails on the unused files, exports and dependencies the turn added, never on the ones already there, so it works on a repo that already has some.",
       "requires": [
         {

@@ -1,0 +1,85 @@
+{
+  "title": "Angular",
+  "description": "Gates for an Angular project tested with Vitest through the Angular builder, ng test. Each tool comes from the repo's node_modules, so its version is the one the lockfile pins.",
+  "gates": [
+    {
+      "description": "Runs the unit tests in a watch kept warm between turns, since ng test builds the whole application before a single test runs. At the stop, it waits for the watch to finish with the turn's changes, then fails on a build that does not compile, and on every red spec, the ones the change did not rerun included. The whole check runs ng test once, without a watch.",
+      "requires": [
+        {
+          "tool": "@angular/cli",
+          "install": "npm install --save-dev @angular/cli"
+        },
+        {
+          "tool": "@angular/build",
+          "install": "npm install --save-dev @angular/build"
+        },
+        {
+          "tool": "vitest",
+          "install": "npm install --save-dev vitest"
+        }
+      ],
+      "gate": {
+        "name": "tests",
+        "severity": "error",
+        "files": "\\.(ts|html|css)$",
+        "run": ["@angular/cli", "test", "--watch=false"],
+        "watch": {
+          "run": ["{engine}/src/helpers/angular-watch.ts"],
+          "cycleStart": "Changes detected\\. Rebuilding",
+          "cycleEnd": "Test run finished with success|bundle generation failed",
+          "failed": "^FAIL |bundle generation failed"
+        }
+      }
+    },
+    {
+      "description": "Builds the application in a watch kept warm between turns, which type-checks every template, the ones of a component no spec reaches included: tsc alone never reads a template. At the stop, it fails on a build that does not compile, with the file and line of each error. Built without optimization into node_modules/.cache, so the dist of the project stays as it is. The whole check builds once, without a watch.",
+      "requires": [
+        {
+          "tool": "@angular/cli",
+          "install": "npm install --save-dev @angular/cli"
+        },
+        {
+          "tool": "@angular/build",
+          "install": "npm install --save-dev @angular/build"
+        }
+      ],
+      "gate": {
+        "name": "build",
+        "severity": "error",
+        "files": "\\.(ts|html|css|scss|sass|less)$",
+        "run": ["@angular/cli", "build", "--optimization=false", "--output-path=node_modules/.cache/gates/build"],
+        "watch": {
+          "run": [
+            "@angular/cli",
+            "build",
+            "--watch",
+            "--optimization=false",
+            "--output-path=node_modules/.cache/gates/build"
+          ],
+          "cycleStart": "Changes detected\\. Rebuilding",
+          "cycleEnd": "Application bundle generation (complete|failed)",
+          "failed": "Application bundle generation failed"
+        }
+      }
+    },
+    {
+      "description": "Lints the changed templates with angular-eslint, warnings included: the lint of the TypeScript catalog reads no .html file. It needs an ESLint config that gives .html files to angular-eslint, such as its templateRecommended and templateAccessibility configs.",
+      "requires": [
+        {
+          "tool": "eslint",
+          "install": "npm install --save-dev eslint"
+        },
+        {
+          "tool": "angular-eslint",
+          "install": "npm install --save-dev angular-eslint"
+        }
+      ],
+      "gate": {
+        "name": "template-lint",
+        "severity": "error",
+        "files": "\\.html$",
+        "run": ["eslint", "--max-warnings", "0", "--no-warn-ignored", "{files}"]
+      }
+    }
+  ]
+}

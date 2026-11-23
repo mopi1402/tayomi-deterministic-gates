@@ -19,6 +19,10 @@ interface Fault {
   gate: string;
   what: string;
   edits: Edits;
+  /** A turn before the one with the fault, in the same project, such as for a watch that keeps its state. */
+  before?: Edits;
+  /** What the report of the gate says, when the header alone could come from another failure. */
+  says?: RegExp;
 }
 
 interface Sample {
@@ -42,7 +46,72 @@ const ORDER = `export function describeOrder(items: string[], total: number, cur
 }
 `;
 
+const ADD = (body: string) => `export function add(a: number, b: number): number {\n  return ${body};\n}\n`;
+
+/** A component whose template is a file of its own, which the template lint reads. */
+const LOGO = `import { Component } from "@angular/core";
+
+/** The logo of the application. */
+@Component({ selector: "app-logo", templateUrl: "./logo.html" })
+export class Logo {}
+`;
+
 const SAMPLES: Record<string, Sample> = {
+  angular: {
+    clean: {
+      "src/app/add.ts": `/** The sum of two numbers. */\n${ADD("a + b")}`,
+      "src/app/logo.ts": LOGO,
+      "src/app/logo.html": '<img src="logo.png" alt="The logo" />\n',
+    },
+    faults: [
+      {
+        gate: "tests",
+        what: "a change that breaks a spec",
+        edits: { "src/app/add.ts": ADD("a - b") },
+        says: /^FAIL src\/app\/add\.spec\.ts > add > adds two numbers$/m,
+      },
+      {
+        gate: "tests",
+        what: "a build that does not compile",
+        edits: { "src/app/add.ts": ADD('a + b + "1"') },
+        says: /bundle generation failed[^]*TS2322/,
+      },
+      {
+        gate: "tests",
+        what: "a spec still red from the turn before, when the change reruns only another one",
+        before: { "src/app/add.ts": ADD("a - b") },
+        says: /^FAIL src\/app\/add\.spec\.ts > add > adds two numbers$/m,
+        edits: {
+          "src/app/greet.ts":
+            "/** A greeting by name. */\nexport function greet(name: string): string {\n  return `Hello, ${name}!`;\n}\n",
+        },
+      },
+      {
+        gate: "build",
+        what: "a template that does not compile, in a component no spec imports",
+        edits: {
+          "src/app/hello.ts": `import { Component, input } from "@angular/core";
+
+/** A greeting, in a template that calls a method a string does not have. */
+@Component({ selector: "app-hello", template: "<p>{{ name().toFixed(2) }}</p>" })
+export class Hello {
+  readonly name = input.required<string>();
+}
+`,
+        },
+        says: /^src\/app\/hello\.ts:\d+:\d+:$|TS2551/m,
+      },
+      {
+        gate: "template-lint",
+        what: "an image with no text for a screen reader",
+        edits: {
+          "src/app/logo.ts": LOGO,
+          "src/app/logo.html": '<img src="logo.png" />\n',
+        },
+        says: /template\/alt-text/,
+      },
+    ],
+  },
   typescript: {
     clean: {
       "src/add.ts":
@@ -74,6 +143,15 @@ const SAMPLES: Record<string, Sample> = {
         gate: "no-new-clones",
         what: "a function pasted twice",
         edits: { "src/first.ts": ORDER, "src/second.ts": ORDER },
+      },
+      {
+        gate: "no-new-strict-errors",
+        what: "a value that may be undefined, which the project lets through with strictNullChecks off",
+        edits: {
+          "src/first.ts":
+            "export function first(items: string[]): string {\n  return items.find((item) => item.length > 0);\n}\n",
+        },
+        says: /^src\/first\.ts: error TS2322: Type 'string \| undefined'/m,
       },
       {
         gate: "no-new-dead-code",
@@ -195,56 +273,70 @@ function project(technology: string, entries: Entry[]) {
       for (const [file, text] of Object.entries(edits)) writeFileSync(join(root, file), text);
     },
     stop: () => handleHook("check", event("Stop", { stop_hook_active: false })),
-    remove: () => rmSync(root, { recursive: true, force: true }),
+    // The session ends, which stops the watches it started.
+    remove: async () => {
+      await handleHook("session-end", event("SessionEnd", { reason: "other" }));
+      rmSync(root, { recursive: true, force: true });
+    },
   };
 }
 
-/** One turn of the agent: prompt, edits, stop. */
-async function turn(technology: string, entries: Entry[], edits: Edits) {
+/** One turn of the agent: prompt, edits, stop. Given edits before, a turn with them comes first, in the same project. */
+async function turn(technology: string, entries: Entry[], edits: Edits, before?: Edits) {
   const agent = project(technology, entries);
   try {
+    if (before !== undefined) {
+      await agent.prompt();
+      agent.edit(before);
+      await agent.stop();
+    }
     assert.equal(await agent.prompt(), undefined, "the turn starts");
     agent.edit(edits);
     const output = await agent.stop();
     assert.ok(output, "the stop is checked");
     return { ...output, systemMessage: stripVTControlCharacters(output.systemMessage) };
   } finally {
-    agent.remove();
+    await agent.remove();
   }
 }
 
-for (const catalog of readCatalogs(CATALOG_DIR)) {
-  const sample = SAMPLES[catalog.id];
-  describe(catalog.id, () => {
-    test("has a sample project, and a fault for every gate of the catalog", () => {
-      assert.ok(sample, `integration/${catalog.id} is missing`);
-      assert.deepEqual(
-        sample.faults.map(({ gate }) => gate).sort(),
-        catalog.entries.map(({ gate }) => gate.name).sort(),
-      );
-    });
-    if (sample === undefined) return;
-
-    // The gates whose tools are installed: a turn whose gates miss a tool starts by asking for it.
-    const runnable = catalog.entries.filter((entry) => !missingTools(catalog.id, entry).length);
-
-    test("passes every gate on a clean change", async () => {
-      for (const entry of catalog.entries) assertInstalled(catalog.id, entry);
-      const { decision, systemMessage } = await turn(catalog.id, runnable, sample.clean);
-      assert.equal(decision, undefined, systemMessage);
-      assert.match(systemMessage, new RegExp(`${runnable.length}/${runnable.length} gates green`));
-      assert.doesNotMatch(systemMessage, /not compared|skipped/);
-    });
-
-    for (const fault of sample.faults) {
-      const entry = catalog.entries.find(({ gate }) => gate.name === fault.gate);
-      test(`${fault.gate} catches ${fault.what}`, async () => {
-        assert.ok(entry, `the catalog has no gate ${fault.gate}`);
-        assertInstalled(catalog.id, entry);
-        const { decision, reason, systemMessage } = await turn(catalog.id, runnable, fault.edits);
-        assert.equal(decision, "block", systemMessage);
-        assert.match(reason ?? "", new RegExp(`^## ${fault.gate}\\n`, "m"));
+// Each turn plays in a copy of its sample, with watches of its own: the catalogs run side by side, and the turns of
+// one two at a time, which keeps the tools of a catalog from crowding the machine.
+describe("the catalogs", { concurrency: true }, () => {
+  for (const catalog of readCatalogs(CATALOG_DIR)) {
+    const sample = SAMPLES[catalog.id];
+    describe(catalog.id, { concurrency: 2 }, () => {
+      test("has a sample project, and a fault for every gate of the catalog", () => {
+        assert.ok(sample, `integration/${catalog.id} is missing`);
+        assert.deepEqual(
+          [...new Set(sample.faults.map(({ gate }) => gate))].sort(),
+          catalog.entries.map(({ gate }) => gate.name).sort(),
+        );
       });
-    }
-  });
-}
+      if (sample === undefined) return;
+
+      // The gates whose tools are installed: a turn whose gates miss a tool starts by asking for it.
+      const runnable = catalog.entries.filter((entry) => !missingTools(catalog.id, entry).length);
+
+      test("passes every gate on a clean change", async () => {
+        for (const entry of catalog.entries) assertInstalled(catalog.id, entry);
+        const { decision, systemMessage } = await turn(catalog.id, runnable, sample.clean);
+        assert.equal(decision, undefined, systemMessage);
+        assert.match(systemMessage, new RegExp(`${runnable.length}/${runnable.length} gates green`));
+        assert.doesNotMatch(systemMessage, /not compared|skipped/);
+      });
+
+      for (const fault of sample.faults) {
+        const entry = catalog.entries.find(({ gate }) => gate.name === fault.gate);
+        test(`${fault.gate} catches ${fault.what}`, async () => {
+          assert.ok(entry, `the catalog has no gate ${fault.gate}`);
+          assertInstalled(catalog.id, entry);
+          const { decision, reason, systemMessage } = await turn(catalog.id, runnable, fault.edits, fault.before);
+          assert.equal(decision, "block", systemMessage);
+          assert.match(reason ?? "", new RegExp(`^## ${fault.gate}\\n`, "m"));
+          if (fault.says) assert.match(reason ?? "", fault.says);
+        });
+      }
+    });
+  }
+});
