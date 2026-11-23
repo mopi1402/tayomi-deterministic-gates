@@ -740,6 +740,8 @@ describe("a gate that keeps a watch", { concurrency: true }, () => {
     } finally {
       for (const id of sessions) await end(id);
     }
+    // The watch stops with the last session, writing in the repo: it is removed only once the watch is done.
+    assert.deepEqual(await events(repo, 2), ["started", "stopped"]);
   });
 
   watchTest(
