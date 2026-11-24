@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.1
+
+### Fixed
+
+- A cycle a watch opens for a change of another gate or session no longer answers for a touch the watch missed, which passed a broken change green: a stop waits for four cycles of a watch again, as in 0.7.0
+
 ## 0.8.0
 
 ### Changed

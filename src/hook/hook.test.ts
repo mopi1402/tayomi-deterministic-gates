@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
@@ -418,7 +418,8 @@ type Agent = ReturnType<typeof session>;
 // change made in between is one it never sees by itself, since a cycle reads again only the files whose date changed
 // since it last read them, as a watch that builds incrementally does. Given "known" after that, it reads only the files there
 // were when it started, as ng test with a spec created since, and fails to build once one of them is gone, as ng test
-// with a spec deleted since.
+// with a spec deleted since. Given a number of milliseconds after that, it looks for changes only that long after its
+// first cycle has ended, as a watch that says it has built before it follows its files.
 const WATCH = [
   'import { appendFileSync, existsSync, readdirSync, readFileSync, statSync } from "node:fs";',
   'if (process.argv[2]) appendFileSync(process.argv[2], "started\\n");',
@@ -469,9 +470,11 @@ const WATCH = [
   "const first = read();",
   "setTimeout(() => {",
   "  report(first);",
-  "  for (const file of dates.keys()) dates.set(file, dated(file));",
-  "  seen = state();",
-  "  look();",
+  "  setTimeout(() => {",
+  "    for (const file of dates.keys()) dates.set(file, dated(file));",
+  "    seen = state();",
+  "    look();",
+  "  }, Number(process.argv[6] ?? 0));",
   "}, Number(process.argv[4] ?? 0));",
 ].join("\n");
 
@@ -691,6 +694,28 @@ describe("a gate that keeps a watch", { concurrency: true }, () => {
       await events(repo, 1);
       writeFileSync(join(repo, "a.ts"), "broken");
       assertSentBackFor(await agent.stop(repo), "a.ts");
+    },
+  );
+
+  watchTest(
+    "judges a change the watch missed, when a change of another file opens the cycle its own touch did not",
+    async (agent) => {
+      // The watch says its first cycle has ended 600 ms before it looks for changes: a touch made in between is lost.
+      const repo = watched(agent, gate(["watch.mjs", "events.log", "100", "1500", "", "600"]));
+      writeFileSync(join(repo, "a.ts"), "fine");
+      writeFileSync(join(repo, "other.ts"), "fine");
+      await agent.prompt(repo);
+      await events(repo, 1);
+      writeFileSync(join(repo, "a.ts"), "broken");
+      // Another gate, or another session, keeps changing a file meanwhile: the watch opens a cycle for it, which is
+      // no answer to a touch the watch did not see.
+      const other = setInterval(() => utimesSync(join(repo, "other.ts"), new Date(), new Date()), 50);
+      setTimeout(() => clearInterval(other), 3000);
+      try {
+        assertSentBackFor(await agent.stop(repo), "a.ts");
+      } finally {
+        clearInterval(other);
+      }
     },
   );
 

@@ -249,11 +249,14 @@ async function restartOnFrozenChange(session: string, root: string, gate: Watche
  * Asks the watch of a gate for a cycle that read the files of the turn, and waits for it, with no guess on how long a
  * watch takes to see a change. Each round touches files, then waits for the watch to open a cycle after the touch,
  * which only a watch that saw the touch does:
- * 1. the files of the turn, so that a change it missed reaches it, and the sync file. A watch that does not look for
- *    changes yet sees neither, and both are touched again;
- * 2. the sync file, once that cycle has closed: the cycle of round 1 may have been on its way before the touch, and
+ * 1. the sync file alone. The cycle that follows proves the watch now looks for changes, whoever made it open: a
+ *    watch may look for them only once its first cycle is over, as Angular and tsc do, and a touch made before is
+ *    lost. Touched with the sync file in this round, the files of the turn could be lost with it, and a cycle the
+ *    watch then opens for a change of someone else, another gate or another session, would answer for them;
+ * 2. the files of the turn, so that a change it missed reaches it, then the sync file;
+ * 3. the sync file, once that cycle has closed: the cycle of round 2 may have been on its way before the touch, and
  *    this one opens after every change the watch then had waiting;
- * 3. the sync file once more, since the cycle it opens ends the one of round 2, the one that judges, whose last lines
+ * 4. the sync file once more, since the cycle it opens ends the one of round 3, the one that judges, whose last lines
  *    may come after the line that closes it.
  * A watch that opens no cycle however often it is touched does not look at its sync file, and is said so. A watch no
  * hook started, as when the hooks were installed mid-session, starts now, and so does one the engine
@@ -276,7 +279,7 @@ async function settle(
   }
   await restartOnFrozenChange(session, root, gate, folder);
   const turn = files.map((file) => join(root, file)).filter((path) => existsSync(path));
-  const rounds = [[...turn, sync], [sync], [sync]];
+  const rounds = [[sync], ...(turn.length ? [[...turn, sync]] : []), [sync], [sync]];
   let asked: string | undefined;
   let round = 0;
   // The cycles the watch had opened when the round touched its files, when it last did, and how many times: none

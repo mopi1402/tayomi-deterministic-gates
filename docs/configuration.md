@@ -86,9 +86,10 @@ As a session starts or a prompt arrives, the engine starts the watch in the back
 
 When the agent stops after changing a file the gate looks at, the engine never guesses what the watch has read: it asks the watch for a cycle, and judges only a cycle the watch opened after being asked. To ask, it gives the `sync` file its date again, which changes neither its content nor what git sees, and waits for the watch to open a cycle. It does so in rounds, each once the cycle before it has closed:
 
-1. The files of the turn that the gate looks at, so that a change the watch missed reaches it, and `sync`. A watch may look for changes only once its first cycle is over, as Angular and tsc do, and never see a change made while it built.
-2. `sync` again: the cycle of round 1 may have been on its way before the files were touched, and this one opens after every change the watch then had waiting. It is the cycle that judges.
-3. `sync` once more, since the cycle it opens ends the one of round 2, whose last lines may come after the line that closes it.
+1. `sync` alone. The cycle that follows proves the watch now looks for changes: a watch may do so only once its first cycle is over, as Angular and tsc do, and never see a change made while it built. The files of the turn wait for that proof, since a cycle the watch opens for a change of another gate or session would otherwise answer for a touch it missed.
+2. The files of the turn that the gate looks at, so that a change the watch missed reaches it, then `sync`.
+3. `sync` again: the cycle of round 2 may have been on its way before the files were touched, and this one opens after every change the watch then had waiting. It is the cycle that judges.
+4. `sync` once more, since the cycle it opens ends the one of round 3, whose last lines may come after the line that closes it.
 
 A watch that opens no cycle within 1 s of a touch is touched again, then after 2 s, 4 s and so on. One that has opened none after five touches does not look at its `sync` file, and fails the gate saying so: not every watch rebuilds for the file one expects, and Angular 21 does not for a tsconfig, where Angular 22 does. The gate is otherwise red with the lines of the judged cycle when one matches `failed`, green otherwise. A watch that does not answer within the time of the gate shows out of time, never green: no older cycle judges the turn. The watch then owes a cycle for the files of that turn: the next stop it answers touches them again with its own, so a change it missed does not stay unseen until the file changes again. A `sync` file that does not exist fails the gate.
 
