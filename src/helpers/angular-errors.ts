@@ -15,7 +15,8 @@ import { strictErrorLines } from "./type-errors.ts";
 //
 // With --watch, it stays, and checks again each time the date of its tsconfig changes, which is how the engine asks
 // a watch for a cycle. It follows no other file: a check reads the files as they are when it starts, the ones whose
-// date changed since the check before it, so it never misses a change, and it reuses the program of that check.
+// date changed since the check before it, so it never misses a change, and it reuses the program of that check. When
+// no file that check read has changed, it says what that check said, without checking again.
 
 /** A diagnostic of the Angular compiler, as its API gives it. */
 export interface Diagnostic {
@@ -110,7 +111,14 @@ export async function compilerOf(root: string, args: string[]): Promise<{ compil
   // is how the compiler knows it need not check it again.
   const sources = new Map<string, { at: number; source: unknown }>();
   const resources = new Map<string, number>();
-  let last: { program: unknown; options: string } | undefined;
+  let last:
+    { program: unknown; options: string; roots: string; reused: boolean; checked: readonly Diagnostic[] } | undefined;
+  // No file the check before this one read has another date: it would say the same.
+  const unchanged = () => {
+    for (const [file, { at }] of sources) if (changedAt(file) !== at) return false;
+    for (const [file, at] of resources) if (changedAt(file) !== at) return false;
+    return true;
+  };
   return {
     compiler: {
       async diagnostics() {
@@ -122,10 +130,18 @@ export async function compilerOf(root: string, args: string[]): Promise<{ compil
           sources.clear();
           resources.clear();
         }
+        // The check before this one stands when nothing it read has changed, which saves checking every file again.
+        // Never the first check of a compiler: TypeScript reports some errors once per type, in the first file it
+        // checks, and that order is another in a program that reuses one, so a first check served again would be
+        // compared with the checks after it, and an error would look new for having moved.
+        const roots = JSON.stringify(config.rootNames);
+        if (last?.reused && last.roots === roots && unchanged()) return [...config.errors, ...last.checked];
         const base = ng.createCompilerHost({ options });
+        const asked = new Set<string>();
         const host = {
           ...base,
           getSourceFile(file: string, ...rest: unknown[]) {
+            asked.add(file);
             const at = changedAt(file);
             const kept = sources.get(file);
             if (kept?.at === at) return kept.source;
@@ -150,15 +166,19 @@ export async function compilerOf(root: string, args: string[]): Promise<{ compil
             return modified;
           },
         };
+        const reused = last !== undefined;
         const program = new ng.NgtscProgram(config.rootNames, options, host, last?.program);
         await program.loadNgStructureAsync();
-        last = { program, options: JSON.stringify(options) };
-        return [
-          ...config.errors,
+        const checked: readonly Diagnostic[] = [
           ...program.getTsSyntacticDiagnostics(),
           ...program.getTsSemanticDiagnostics(),
           ...program.getNgSemanticDiagnostics(),
         ];
+        // A file the program no longer reads is forgotten once it changes: kept with its old date, it would make
+        // every check to come a whole one.
+        for (const [file, { at }] of sources) if (!asked.has(file) && changedAt(file) !== at) sources.delete(file);
+        last = { program, options: JSON.stringify(options), roots, reused, checked };
+        return [...config.errors, ...checked];
       },
     },
   };

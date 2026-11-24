@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { after, describe, test } from "node:test";
 import { compilerOf, angularErrors } from "./angular-errors.ts";
 
@@ -119,5 +120,124 @@ describe("the Angular compiler, as the strict errors gate runs it", () => {
       refused:
         "The API of @angular/compiler-cli 99.0.0 is not the one this gate knows: it has no NgtscProgram. Update deterministic-gates.",
     });
+  });
+});
+
+// A compiler with the API the helper knows, which says how many programs it has built: each program reads its root
+// files and the template beside each, and says which program it is.
+const FAKE_COMPILER = `import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import ts from "typescript";
+export const built = [];
+export const readConfiguration = (file) => {
+  const config = JSON.parse(readFileSync(file, "utf8"));
+  const rootNames = config.files.map((name) => join(dirname(file), name));
+  return { rootNames, options: config.compilerOptions ?? {}, errors: [] };
+};
+export const createCompilerHost = ({ options }) => ts.createCompilerHost(options);
+export class NgtscProgram {
+  constructor(rootNames, options, host) {
+    built.push(rootNames);
+    this.said = "program " + built.length;
+    this.read = () => {
+      host.getModifiedResourceFiles();
+      for (const root of rootNames) {
+        host.getSourceFile(root, 99);
+        host.readFile(root.replace(/\\.ts$/, ".html"));
+      }
+    };
+  }
+  async loadNgStructureAsync() {
+    this.read();
+  }
+  getTsSyntacticDiagnostics() {
+    return [];
+  }
+  getTsSemanticDiagnostics() {
+    return [{ code: 1, messageText: this.said }];
+  }
+  getNgSemanticDiagnostics() {
+    return [];
+  }
+}
+`;
+
+describe("the Angular compiler, checking again a project it has checked", () => {
+  const repo = mkdtempSync(join(tmpdir(), "gates-angular-"));
+  const package_ = join(repo, "node_modules", "@angular", "compiler-cli");
+  const tsconfig = (files: string[], compilerOptions: object = {}) =>
+    writeFileSync(join(repo, "tsconfig.json"), JSON.stringify({ files, compilerOptions }));
+  // A date of its own for each change: two changes in the same millisecond would read as none.
+  let date = Date.now();
+  const touch = (file: string) => {
+    date += 5000;
+    utimesSync(join(repo, file), new Date(date), new Date(date));
+  };
+  mkdirSync(package_, { recursive: true });
+  symlinkSync(
+    resolve(import.meta.dirname, "..", "..", "node_modules", "typescript"),
+    join(repo, "node_modules", "typescript"),
+  );
+  writeFileSync(
+    join(package_, "package.json"),
+    JSON.stringify({
+      name: "@angular/compiler-cli",
+      version: "99.0.0",
+      type: "module",
+      exports: { ".": "./index.js", "./package.json": "./package.json" },
+    }),
+  );
+  writeFileSync(join(package_, "index.js"), FAKE_COMPILER);
+  for (const file of ["a.ts", "a.html", "b.ts", "b.html"]) writeFileSync(join(repo, file), "");
+  after(() => rmSync(repo, { recursive: true, force: true }));
+
+  // The compiler of the repo once it has checked twice, with what a check says and the programs built so far.
+  async function checkedTwice() {
+    tsconfig(["a.ts", "b.ts"]);
+    const { built } = (await import(pathToFileURL(join(package_, "index.js")).href)) as { built: unknown[] };
+    const found = await compilerOf(repo, []);
+    assert.ok("compiler" in found);
+    const check = async () => {
+      const [said] = await found.compiler.diagnostics();
+      return typeof said?.messageText === "string" ? said.messageText : "";
+    };
+    await check();
+    await check();
+    return { check, programs: () => built.length };
+  }
+
+  test("checks again at its second check, even when nothing changed: its first check prints otherwise", async () => {
+    tsconfig(["a.ts", "b.ts"]);
+    const found = await compilerOf(repo, []);
+    assert.ok("compiler" in found);
+    const [first] = await found.compiler.diagnostics();
+    const [second] = await found.compiler.diagnostics();
+    assert.notEqual(first?.messageText, second?.messageText);
+  });
+
+  test("says what its check before said, without building a program, when no file it read has changed", async () => {
+    const { check, programs } = await checkedTwice();
+    const said = await check();
+    const built = programs();
+    assert.equal(await check(), said);
+    assert.equal(await check(), said);
+    assert.equal(programs(), built);
+  });
+
+  test("checks again once a file it read has changed or is gone, or the tsconfig lists other files or options", async () => {
+    const { check, programs } = await checkedTwice();
+    for (const [what, change] of [
+      ["the date of a source", () => touch("a.ts")],
+      ["the date of a template", () => touch("b.html")],
+      ["the files of the tsconfig", () => tsconfig(["a.ts"])],
+      ["the options of the tsconfig", () => tsconfig(["a.ts"], { strict: true })],
+      ["a file deleted", () => rmSync(join(repo, "a.html"))],
+    ] as const) {
+      const before = await check();
+      const built = programs();
+      change();
+      assert.notEqual(await check(), before, what);
+      assert.ok(programs() > built, what);
+    }
   });
 });

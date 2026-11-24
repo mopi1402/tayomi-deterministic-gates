@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.2
+
+### Changed
+
+- `no-new-strict-errors` of the Angular catalog says what its check before said when no file it read has changed, without checking again
+
 ## 0.8.1
 
 ### Fixed
