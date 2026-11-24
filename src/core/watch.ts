@@ -7,13 +7,14 @@ import {
   openSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
 import { type Gate, isCompared, type Watch, type WatchedGate } from "./config.ts";
@@ -21,9 +22,13 @@ import { addedLines, cleaned, commandOf, ENGINE_VERSION, type Outcome, toolEnv }
 import { listFiles } from "./snapshot.ts";
 
 // A watch that has not opened a cycle this long after the engine touched its sync file is touched again: it may look
-// for changes only once its first cycle is over, as Angular and tsc do, and never see a touch made before. The wait
-// changes no verdict, which only ever comes from a cycle the watch opened after a touch.
+// for changes only once its first cycle is over, as Angular and tsc do, and never see a touch made before. Each wait
+// is twice the one before, since a watch on a busy machine takes seconds to say it opens a cycle, and a touch too
+// many is a cycle too many. The wait changes no verdict, which only ever comes from a cycle the watch opened after a
+// touch. The tests of the engine shorten it.
 const RESYNC_MS = 1000;
+// A watch that opens no cycle after this many touches, 31 s after the first, does not look at its sync file.
+const SYNC_TOUCHES = 5;
 const POLL_MS = 100;
 // What a watch that stopped leaves the agent: enough to see the error, not the whole history of the session.
 const LAST_LINES = 20;
@@ -39,6 +44,10 @@ const IDLE_MS = 30 * 60 * 1000;
 
 function idleMs(): number {
   return Number(process.env.GATES_WATCH_IDLE_MS) || IDLE_MS;
+}
+
+function resyncMs(): number {
+  return Number(process.env.GATES_WATCH_RESYNC_MS) || RESYNC_MS;
 }
 
 /** Records a prompt or a stop on the repo of a watch, which keeps it from stopping for idleness. */
@@ -144,10 +153,13 @@ function launch(folder: string, root: string, watch: Watch): void {
   rmSync(join(folder, "idle"), { force: true });
   // The first cycle of a watch reads every file there is: it owes a cycle for none.
   rmSync(join(folder, "owed"), { recursive: true, force: true });
+  // What the watch before this one left of its cycles.
+  for (const left of ["cycles", "cycle", "last"]) rmSync(join(folder, left), { force: true });
   const [name = "", ...args] = watch.run;
   const command = commandOf(root, name);
   const supervisor = commandOf(root, "{engine}/src/core/watch.ts");
-  const watched = [join(folder, "activity"), String(idleMs()), command.file, ...command.args, ...args];
+  const cycle = [watch.cycleStart, watch.cycleEnd];
+  const watched = [folder, String(idleMs()), ...cycle, command.file, ...command.args, ...args];
   // Listed before the watch starts: a file created in between counts as one it may not know, never the other way.
   writeFileSync(join(folder, "frozen"), frozenFiles(root, watch));
   const log = openSync(join(folder, "output.log"), "w");
@@ -163,41 +175,18 @@ function launch(folder: string, root: string, watch: Watch): void {
   writeFileSync(join(folder, "pid"), String(child.pid ?? ""));
 }
 
-/** The cycles of a watch, from what it printed since it started. */
+/** The cycles of a watch since it started, as its supervisor counts them. */
 interface Cycles {
   /** How many cycles the watch opened, the one its start opens left out. */
   opened: number;
   /** Whether the last cycle is still open. */
   open: boolean;
-  /** The lines of the cycle before the last: nothing is printed in it any more, since the next one has opened. */
-  complete: string[];
 }
 
-function cyclesOf(printed: string, watch: Watch): Cycles {
-  const lines = printed.split("\n");
-  if (lines.at(-1) === "") lines.pop();
-  const opens = new RegExp(watch.cycleStart);
-  const closes = new RegExp(watch.cycleEnd);
-  // The start of the watch opens the first cycle, and lines after the one that closes a cycle still belong to it. A
-  // line that opens a cycle while one is open belongs to that one: Angular says it rebuilds as it starts to, and
-  // again once it has, and counting both would end a cycle before its first line.
-  const starts: number[] = [];
-  let open = true;
-  lines.forEach((line, at) => {
-    if (closes.test(line)) open = false;
-    else if (!open && opens.test(line)) {
-      starts.push(at);
-      open = true;
-    }
-  });
-  const last = starts.at(-1);
-  return {
-    opened: starts.length,
-    open,
-    // Less the lines that say it opened, which tell the agent nothing.
-    complete:
-      last === undefined ? [] : lines.slice((starts.at(-2) ?? -1) + 1, last).filter((line) => !opens.test(line)),
-  };
+// A watch whose supervisor has written nothing yet is in the cycle its start opens.
+function cyclesOf(folder: string): Cycles {
+  const [opened, state] = readText(join(folder, "cycles")).split(" ");
+  return { opened: Number(opened), open: state !== "closed" };
 }
 
 /** Gives the files their date again, as a change of nothing else, for a watch that looks at their date. */
@@ -218,12 +207,18 @@ function changedAt(path: string): number {
   }
 }
 
-function readLog(log: string): string {
+function readText(path: string): string {
   try {
-    return readFileSync(log, "utf8");
+    return readFileSync(path, "utf8");
   } catch {
     return "";
   }
+}
+
+/** Writes a file at once, so that a hook reading it never finds half of it. */
+function writeWhole(path: string, text: string): void {
+  writeFileSync(`${path}.new`, text);
+  renameSync(`${path}.new`, path);
 }
 
 /** Where a watch is once it has answered, with the lines of the cycle that judges, or once it no longer can. */
@@ -235,9 +230,9 @@ type Settled = { ms: number } & ({ cycle: string } | { stopped: string } | { tim
  */
 async function restartOnFrozenChange(session: string, root: string, gate: WatchedGate, folder: string): Promise<void> {
   if (gate.watch.frozen === undefined || stateOf(folder) !== "running") return;
-  if (readLog(join(folder, "frozen")) === frozenFiles(root, gate.watch) || !lockStart(folder)) return;
+  if (readText(join(folder, "frozen")) === frozenFiles(root, gate.watch) || !lockStart(folder)) return;
   try {
-    if (stateOf(folder) !== "running" || readLog(join(folder, "frozen")) === frozenFiles(root, gate.watch)) return;
+    if (stateOf(folder) !== "running" || readText(join(folder, "frozen")) === frozenFiles(root, gate.watch)) return;
     // Stopped by the engine, so that another session waiting on the watch does not take it for one that broke.
     writeFileSync(join(folder, "idle"), "");
     stop(folder);
@@ -254,13 +249,14 @@ async function restartOnFrozenChange(session: string, root: string, gate: Watche
  * Asks the watch of a gate for a cycle that read the files of the turn, and waits for it, with no guess on how long a
  * watch takes to see a change. Each round touches files, then waits for the watch to open a cycle after the touch,
  * which only a watch that saw the touch does:
- * 1. the sync file, which proves the watch now looks for changes;
- * 2. the files of the turn, so that a change it missed reaches it, then the sync file;
- * 3. the sync file, once that cycle has closed: the cycle of round 2 may have been on its way before the touch, and
+ * 1. the files of the turn, so that a change it missed reaches it, and the sync file. A watch that does not look for
+ *    changes yet sees neither, and both are touched again;
+ * 2. the sync file, once that cycle has closed: the cycle of round 1 may have been on its way before the touch, and
  *    this one opens after every change the watch then had waiting;
- * 4. the sync file once more, since the cycle it opens ends the one of round 3, the one that judges, whose last lines
+ * 3. the sync file once more, since the cycle it opens ends the one of round 2, the one that judges, whose last lines
  *    may come after the line that closes it.
- * A watch no hook started, as when the hooks were installed mid-session, starts now, and so does one the engine
+ * A watch that opens no cycle however often it is touched does not look at its sync file, and is said so. A watch no
+ * hook started, as when the hooks were installed mid-session, starts now, and so does one the engine
  * stopped, for idleness or to start it again: it is not to blame. One another session starts again meanwhile is asked
  * again from the first round.
  */
@@ -273,7 +269,6 @@ async function settle(
 ): Promise<Settled> {
   const started = performance.now();
   const folder = folderOf(root, gate);
-  const log = join(folder, "output.log");
   const sync = join(root, gate.watch.sync);
   if (!existsSync(sync)) {
     const stopped = `The watch cannot be asked for a cycle: its watch.sync, ${gate.watch.sync}, does not exist.`;
@@ -281,27 +276,23 @@ async function settle(
   }
   await restartOnFrozenChange(session, root, gate, folder);
   const turn = files.map((file) => join(root, file)).filter((path) => existsSync(path));
-  const rounds = [[sync], ...(turn.length ? [[...turn, sync]] : []), [sync], [sync]];
+  const rounds = [[...turn, sync], [sync], [sync]];
   let asked: string | undefined;
   let round = 0;
-  // The cycles the watch had opened when the round touched its files, and when it did: none before its first touch.
-  let touched: { opened: number; at: number } | undefined;
+  // The cycles the watch had opened when the round touched its files, when it last did, and how many times: none
+  // before its first touch.
+  let touched: { opened: number; at: number; times: number } | undefined;
   for (;;) {
     const state = stateOf(folder);
     if (state === "absent" || state === "idle") startWatch(session, root, gate);
     // Waiting on the watch is using it: it does not stop for idleness under a stop that waits.
     touch(folder);
-    // Read once the watch is known stopped, so its last lines are in.
-    const printed = readLog(log);
     const ms = performance.now() - started;
     if (state === "stopped") {
-      const last = cleaned(
-        root,
-        printed
-          .split("\n")
-          .slice(-LAST_LINES - 1)
-          .join("\n"),
-      );
+      // Read once the watch is known stopped, so its last lines are in: the ones its supervisor kept, or what the
+      // supervisor itself printed when it broke.
+      const printed = readText(join(folder, "last")) || readText(join(folder, "output.log"));
+      const last = cleaned(root, printed.trimEnd().split("\n").slice(-LAST_LINES).join("\n"));
       return {
         ms,
         stopped: last ? `The watch stopped. Its last lines:\n${last}` : "The watch stopped, with no output.",
@@ -313,21 +304,26 @@ async function settle(
       round = 0;
       touched = undefined;
     }
-    const cycles = cyclesOf(printed, gate.watch);
+    const cycles = cyclesOf(folder);
     if (state === "running" && touched === undefined) {
       // A round starts once the cycle before it has closed.
       if (!cycles.open) {
         touchAgain(rounds[round] ?? []);
-        touched = { opened: cycles.opened, at: Date.now() };
+        touched = { opened: cycles.opened, at: Date.now(), times: 1 };
       }
     } else if (touched !== undefined && cycles.opened > touched.opened) {
-      if (round === rounds.length - 1) return { ms, cycle: cleaned(root, cycles.complete.join("\n")) };
+      // Written before the count of the cycle that ended it: the cycle read is that one, or a later one.
+      if (round === rounds.length - 1) return { ms, cycle: cleaned(root, readText(join(folder, "cycle"))) };
       round++;
       touched = undefined;
       continue;
-    } else if (touched !== undefined && Date.now() - touched.at >= RESYNC_MS) {
+    } else if (touched !== undefined && Date.now() - touched.at >= resyncMs() * 2 ** (touched.times - 1)) {
+      if (touched.times === SYNC_TOUCHES) {
+        const stopped = `The watch opens no cycle when the date of its watch.sync, ${gate.watch.sync}, changes: give it a file the watch rebuilds for, such as a source file it reads.`;
+        return { ms, stopped };
+      }
       touchAgain(rounds[round] ?? []);
-      touched.at = Date.now();
+      touched = { ...touched, at: Date.now(), times: touched.times + 1 };
     }
     if (ms >= limitMs) return { ms, timedOut: true };
     await sleep(POLL_MS);
@@ -340,7 +336,7 @@ async function settle(
  */
 function owedFiles(folder: string): { lists: string[]; files: string[] } {
   const lists = readDir(join(folder, "owed")).map((name) => join(folder, "owed", name));
-  const files = lists.flatMap((list) => readLog(list).split("\0").filter(Boolean));
+  const files = lists.flatMap((list) => readText(list).split("\0").filter(Boolean));
   return { lists, files: [...new Set(files)] };
 }
 
@@ -432,25 +428,62 @@ function stop(folder: string): void {
 }
 
 /**
- * The supervisor of a watch, which this module runs as when the engine starts one: it runs the watch, its output
- * going where its own goes, and stops it with every process it started once its repo has had no prompt nor stop for
- * the idle delay. Started detached, it leads a process group of its own, so stopping the group stops the watch and
- * the tools under it.
+ * The supervisor of a watch, which this module runs as when the engine starts one: it runs the watch and stops it
+ * with every process it started once its repo has had no prompt nor stop for the idle delay. Started detached, it
+ * leads a process group of its own, so stopping the group stops the watch and the tools under it. It counts the
+ * cycles of the watch as it prints them, and keeps only the lines a hook reads: a watch prints thousands of lines per
+ * cycle for as long as a session lasts, which no hook could read again at each look.
  */
-function supervise(activity: string, idle: number, file: string, args: string[]): void {
+function supervise(folder: string, idle: number, cycle: { start: string; end: string }, command: string[]): void {
+  const [file = "", ...args] = command;
+  const opens = new RegExp(cycle.start);
+  const closes = new RegExp(cycle.end);
   const watch = spawn(file, args, { stdio: ["ignore", "pipe", "pipe"] });
-  const forward = (line: string) => console.log(line);
-  createInterface({ input: watch.stdout }).on("line", forward);
-  createInterface({ input: watch.stderr }).on("line", forward);
+  // The start of the watch opens the first cycle, and lines after the one that closes a cycle still belong to it. A
+  // line that opens a cycle while one is open belongs to that one: Angular says it rebuilds as it starts to, and
+  // again once it has, and counting both would end a cycle before its first line.
+  let opened = 0;
+  let open = true;
+  // The lines of the cycle in progress, less the ones that say it opened, which tell the agent nothing.
+  let lines: string[] = [];
+  // What a watch that stopped leaves the agent.
+  const last: string[] = [];
+  const count = () => writeWhole(join(folder, "cycles"), `${opened} ${open ? "open" : "closed"}`);
+  const read = (line: string) => {
+    last.push(line);
+    if (last.length > LAST_LINES) last.shift();
+    if (closes.test(line)) {
+      if (open) {
+        open = false;
+        count();
+      }
+    } else if (!open && opens.test(line)) {
+      // Nothing is printed in a cycle any more once the next one has opened: its lines are whole, and written before
+      // the count that tells a hook of them.
+      writeWhole(join(folder, "cycle"), lines.join("\n"));
+      lines = [];
+      opened++;
+      open = true;
+      count();
+    }
+    if (!opens.test(line)) lines.push(line);
+  };
+  const end = (code: number) => {
+    writeWhole(join(folder, "last"), last.join("\n"));
+    process.exit(code);
+  };
+  count();
+  createInterface({ input: watch.stdout }).on("line", read);
+  createInterface({ input: watch.stderr }).on("line", read);
   watch.on("error", (error) => {
-    console.log(error.message);
-    process.exit(1);
+    last.push(error.message);
+    end(1);
   });
-  watch.on("close", (code) => process.exit(code ?? 1));
+  watch.on("close", (code) => end(code ?? 1));
   setInterval(
     () => {
-      if (Date.now() - changedAt(activity) < idle) return;
-      writeFileSync(join(dirname(activity), "idle"), "");
+      if (Date.now() - changedAt(join(folder, "activity")) < idle) return;
+      writeFileSync(join(folder, "idle"), "");
       process.kill(-process.pid, "SIGTERM");
     },
     Math.min(idle / 4, 10_000),
@@ -458,6 +491,6 @@ function supervise(activity: string, idle: number, file: string, args: string[])
 }
 
 if (import.meta.main) {
-  const [activity = "", idle = "", file = "", ...args] = process.argv.slice(2);
-  supervise(activity, Number(idle), file, args);
+  const [folder = "", idle = "", start = "", end = "", ...command] = process.argv.slice(2);
+  supervise(folder, Number(idle), { start, end }, command);
 }

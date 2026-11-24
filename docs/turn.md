@@ -72,6 +72,7 @@ flowchart TD
     wait --> answered
     answered -- yes --> last[The gate is judged on a cycle opened after the watch was asked]
     wait -- the time runs out --> late[Out of time, neither green nor red]
+    wait -- five touches, no cycle --> deaf[The gate fails: the watch does not look at its sync file]
 ```
 
 A watch lives across turns and sessions:

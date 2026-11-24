@@ -503,6 +503,15 @@ function assertSentBackFor(stopped: HookOutput | undefined, file: string): void 
   assert.match(stopped?.reason ?? "", new RegExp(`^## tests\\nFAIL ${file.replace(".", "\\.")}$`, "m"));
 }
 
+// A turn that breaks nothing, which the watch gate still fails, saying why.
+async function assertFailsACleanTurn(agent: Agent, repo: string, why: RegExp): Promise<void> {
+  await agent.prompt(repo);
+  writeFileSync(join(repo, "a.ts"), "fine");
+  const stopped = await agent.stop(repo);
+  assert.equal(stopped?.decision, "block");
+  assert.match(stopped?.reason ?? "", why);
+}
+
 // Runs with the idle delay of the watches shortened to the given milliseconds.
 async function idleAfter(ms: number, run: () => Promise<void>): Promise<void> {
   process.env.GATES_WATCH_IDLE_MS = String(ms);
@@ -768,11 +777,7 @@ describe("a gate that keeps a watch", { concurrency: true }, () => {
 
   watchTest("fails a watch whose sync file does not exist, and says so", async (agent) => {
     const repo = watched(agent, gate(undefined, { sync: "missing.sync" }));
-    await agent.prompt(repo);
-    writeFileSync(join(repo, "a.ts"), "fine");
-    const stopped = await agent.stop(repo);
-    assert.equal(stopped?.decision, "block");
-    assert.match(stopped?.reason ?? "", /its watch\.sync, missing\.sync, does not exist/);
+    await assertFailsACleanTurn(agent, repo, /its watch\.sync, missing\.sync, does not exist/);
   });
 
   watchTest("judges each of two sessions that stop at the same instant on the watch they share", async (agent) => {
@@ -914,6 +919,21 @@ describe("a gate that keeps a watch", { concurrency: true }, () => {
       assert.match(stripVTControlCharacters(stopped?.systemMessage ?? ""), /0\/1 gates green in .* · 1 out of time/);
     },
   );
+});
+
+// The wait between two touches is shortened through the environment, which every stop meanwhile reads: one at a time.
+describe("a gate that keeps a watch, with a short wait between two touches", () => {
+  watchTest("fails a watch that never opens a cycle for its sync file, and says to give it another", async (agent) => {
+    process.env.GATES_WATCH_RESYNC_MS = "30";
+    try {
+      // A sync file the watch does not look at, as a tsconfig Angular 21 does not rebuild for.
+      const repo = watched(agent, gate(undefined, { sync: "other.sync" }));
+      writeFileSync(join(repo, "other.sync"), "");
+      await assertFailsACleanTurn(agent, repo, /opens no cycle when the date of its watch\.sync, other\.sync, changes/);
+    } finally {
+      delete process.env.GATES_WATCH_RESYNC_MS;
+    }
+  });
 });
 
 // The idle delay is shortened through the environment, which every watch started meanwhile reads: one at a time.

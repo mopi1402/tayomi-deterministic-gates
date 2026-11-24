@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.1
+
+### Fixed
+
+- A watch that opens no cycle for its `watch.sync` fails after five touches and says so, where the gate waited until it was out of time
+- The `build` gate of the Angular catalog asks through `src/main.ts`: Angular 21 does not rebuild for a tsconfig. For `tests` on Angular 21, give `watch.sync` a spec
+- A stop waits for three cycles of a watch, where it waited for four
+- A stop no longer reads the whole output of a watch again at each look
+
 ## 0.7.0
 
 ### Changed

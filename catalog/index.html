@@ -47,7 +47,7 @@ summary { cursor: pointer; color: var(--muted); }
 <p>Gates for an Angular project tested with Vitest through the Angular builder, ng test. Each tool comes from the repo's node_modules, so its version is the one the lockfile pins.</p>
 <article id="angular/tests">
 <h3><code>angular/tests</code></h3>
-<p>Runs the unit tests in a watch kept warm between turns, since ng test builds the whole application before a single test runs. At the stop, it waits for the watch to finish with the turn's changes, then fails on a build that does not compile, and on every red spec, the ones the change did not rerun included. The whole check runs ng test once, without a watch. The watch is asked for a cycle through tsconfig.spec.json, and starts again when a spec is created or deleted, since ng test lists its specs once.</p>
+<p>Runs the unit tests in a watch kept warm between turns, since ng test builds the whole application before a single test runs. At the stop, it waits for the watch to finish with the turn's changes, then fails on a build that does not compile, and on every red spec, the ones the change did not rerun included. The whole check runs ng test once, without a watch. The watch is asked for a cycle through tsconfig.spec.json, and starts again when a spec is created or deleted, since ng test lists its specs once. Angular 21 does not rebuild for a tsconfig: give its watch.sync a spec.</p>
 <dl>
 <dt>Runs</dt><dd><code>@angular/cli test --watch=false</code></dd>
 <dt>When the turn changes</dt><dd><code>\.(ts|html|css)$</code></dd>
@@ -76,7 +76,7 @@ summary { cursor: pointer; color: var(--muted); }
 </article>
 <article id="angular/build">
 <h3><code>angular/build</code></h3>
-<p>Builds the application in a watch kept warm between turns, which type-checks every template, the ones of a component no spec reaches included: tsc alone never reads a template. At the stop, it fails on a build that does not compile, with the file and line of each error. Built without optimization into node_modules/.cache, so the dist of the project stays as it is. The whole check builds once, without a watch. The watch is asked for a cycle through tsconfig.app.json.</p>
+<p>Builds the application in a watch kept warm between turns, which type-checks every template, the ones of a component no spec reaches included: tsc alone never reads a template. At the stop, it fails on a build that does not compile, with the file and line of each error. Built without optimization into node_modules/.cache, so the dist of the project stays as it is. The whole check builds once, without a watch. The watch is asked for a cycle through src/main.ts.</p>
 <dl>
 <dt>Runs</dt><dd><code>@angular/cli build --optimization=false --output-path=node_modules/.cache/gates/build</code></dd>
 <dt>When the turn changes</dt><dd><code>\.(ts|html|css|scss|sass|less)$</code></dd>
@@ -103,7 +103,7 @@ summary { cursor: pointer; color: var(--muted); }
     &quot;cycleStart&quot;: &quot;Changes detected\\. Rebuilding&quot;,
     &quot;cycleEnd&quot;: &quot;Application bundle generation (complete|failed)&quot;,
     &quot;failed&quot;: &quot;Application bundle generation failed&quot;,
-    &quot;sync&quot;: &quot;tsconfig.app.json&quot;
+    &quot;sync&quot;: &quot;src/main.ts&quot;
   }
 }</code></pre></details>
 </article>

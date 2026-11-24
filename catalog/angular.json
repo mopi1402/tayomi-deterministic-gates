@@ -3,7 +3,7 @@
   "description": "Gates for an Angular project tested with Vitest through the Angular builder, ng test. Each tool comes from the repo's node_modules, so its version is the one the lockfile pins.",
   "gates": [
     {
-      "description": "Runs the unit tests in a watch kept warm between turns, since ng test builds the whole application before a single test runs. At the stop, it waits for the watch to finish with the turn's changes, then fails on a build that does not compile, and on every red spec, the ones the change did not rerun included. The whole check runs ng test once, without a watch. The watch is asked for a cycle through tsconfig.spec.json, and starts again when a spec is created or deleted, since ng test lists its specs once.",
+      "description": "Runs the unit tests in a watch kept warm between turns, since ng test builds the whole application before a single test runs. At the stop, it waits for the watch to finish with the turn's changes, then fails on a build that does not compile, and on every red spec, the ones the change did not rerun included. The whole check runs ng test once, without a watch. The watch is asked for a cycle through tsconfig.spec.json, and starts again when a spec is created or deleted, since ng test lists its specs once. Angular 21 does not rebuild for a tsconfig: give its watch.sync a spec.",
       "requires": [
         {
           "tool": "@angular/cli",
@@ -34,7 +34,7 @@
       }
     },
     {
-      "description": "Builds the application in a watch kept warm between turns, which type-checks every template, the ones of a component no spec reaches included: tsc alone never reads a template. At the stop, it fails on a build that does not compile, with the file and line of each error. Built without optimization into node_modules/.cache, so the dist of the project stays as it is. The whole check builds once, without a watch. The watch is asked for a cycle through tsconfig.app.json.",
+      "description": "Builds the application in a watch kept warm between turns, which type-checks every template, the ones of a component no spec reaches included: tsc alone never reads a template. At the stop, it fails on a build that does not compile, with the file and line of each error. Built without optimization into node_modules/.cache, so the dist of the project stays as it is. The whole check builds once, without a watch. The watch is asked for a cycle through src/main.ts.",
       "requires": [
         {
           "tool": "@angular/cli",
@@ -61,7 +61,7 @@
           "cycleStart": "Changes detected\\. Rebuilding",
           "cycleEnd": "Application bundle generation (complete|failed)",
           "failed": "Application bundle generation failed",
-          "sync": "tsconfig.app.json"
+          "sync": "src/main.ts"
         }
       }
     },
