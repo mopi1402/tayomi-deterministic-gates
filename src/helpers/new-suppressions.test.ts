@@ -12,10 +12,11 @@ describe("newSuppressions", () => {
       "x = 1  # type: ignore",
       "//nolint:errcheck",
       "// prettier-ignore",
+      "/* stylelint-disable-next-line color-named */",
     ].join("\n");
     assert.deepEqual(
       newSuppressions("const a = 1;", after).map(({ line }) => line),
-      [2, 3, 4, 5, 6, 7],
+      [2, 3, 4, 5, 6, 7, 8],
     );
   });
 
@@ -23,6 +24,19 @@ describe("newSuppressions", () => {
     const before = "// eslint-disable-next-line no-console\nconsole.log(1);\n";
     const after = "const b = 2;\n// eslint-disable-next-line no-console\nconsole.log(1);\n";
     assert.deepEqual(newSuppressions(before, after), []);
+  });
+
+  test("finds a suppression that says the same as one already there", () => {
+    const before = "// eslint-disable-next-line no-console\nconsole.log(1);\n";
+    const after = `${before}// eslint-disable-next-line no-console\nconsole.log(2);\n`;
+    assert.deepEqual(
+      newSuppressions(before, after).map(({ line }) => line),
+      [3],
+    );
+  });
+
+  test("leaves a suppression at the end of a line the turn changed", () => {
+    assert.deepEqual(newSuppressions("x = f(a)  # noqa: E501\n", "x = f(a, b)  # noqa: E501\n"), []);
   });
 
   test("counts every suppression of a new file", () => {

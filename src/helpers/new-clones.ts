@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { isRecord, readJsonFile } from "../core/json.ts";
-import { packageScript } from "../core/run.ts";
+import { headed, packageScript } from "../core/run.ts";
 
 // jscpd compared with the tree the turn started from. Its own console report lists every clone of the repo, the old
 // ones included, so this prints only the clones the turn added, one per line.
@@ -48,7 +48,7 @@ function main(root: string, turn: string): void {
     }
     const clones = newClones(readJsonFile(join(output, "jscpd-report.json")));
     if (!clones.length) return;
-    console.log(`New clones: factor each one out.\n${clones.join("\n")}`);
+    console.log(headed("New clones: reuse the code already there, or factor it out.", clones));
     process.exitCode = 1;
   } finally {
     rmSync(output, { recursive: true, force: true });

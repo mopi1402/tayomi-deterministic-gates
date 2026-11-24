@@ -193,6 +193,7 @@ export class Hello {
     clean: {
       "src/add.ts":
         "/** The sum of two numbers. */\nexport function add(a: number, b: number): number {\n  return a + b;\n}\n",
+      "eslint-suppressions.json": "{}\n",
     },
     faults: [
       { gate: "lint", what: "an unused variable", edits: { "src/unused.ts": "const unused = 1;\n" } },
@@ -262,6 +263,12 @@ export class Hello {
           "src/add.ts":
             "// eslint-disable-next-line no-unused-vars\nexport function add(a: number, b: number): number {\n  return a + b;\n}\n",
         },
+      },
+      {
+        gate: "no-new-bulk-suppressions",
+        what: "the violations of a rule written into the suppressions file of ESLint",
+        edits: { "eslint-suppressions.json": '{ "src/add.ts": { "no-unused-vars": { "count": 1 } } }\n' },
+        says: /^eslint-suppressions\.json: src\/add\.ts: no-unused-vars 0 -> 1$/m,
       },
     ],
   },
@@ -351,13 +358,16 @@ function assertInstalled(technology: string, entry: Entry): void {
 }
 
 /** A copy of the sample as a repo of its own, with the given gates, that the agent works in. */
-function project(technology: string, entries: Entry[], start: Edits = {}) {
+function project(technology: string, entries: Entry[], start: Edits = {}, settings: object = {}) {
   const sample = sampleDir(technology);
   const root = mkdtempSync(join(tmpdir(), `gates-${technology}-`));
   cpSync(sample, root, { recursive: true, filter: (source) => basename(source) !== "node_modules" });
   for (const [file, text] of Object.entries(start)) writeFileSync(join(root, file), text);
   if (existsSync(join(sample, "node_modules"))) symlinkSync(join(sample, "node_modules"), join(root, "node_modules"));
-  writeFileSync(join(root, ".gates.json"), JSON.stringify({ gates: entries.map(({ definition }) => definition) }));
+  writeFileSync(
+    join(root, ".gates.json"),
+    JSON.stringify({ ...settings, gates: entries.map(({ definition }) => definition) }),
+  );
   execFileSync("git", ["init", "--quiet"], { cwd: root });
   const session = `integration-${randomUUID()}`;
   const event = (name: string, fields: object) =>
@@ -368,7 +378,7 @@ function project(technology: string, entries: Entry[], start: Edits = {}) {
       for (const [file, text] of Object.entries(edits)) writeFileSync(join(root, file), text);
       for (const file of deletes) rmSync(join(root, file));
     },
-    stop: () => handleHook("check", event("Stop", { stop_hook_active: false })),
+    stop: (retry = false) => handleHook("check", event("Stop", { stop_hook_active: retry })),
     // The session ends, which stops the watches it started.
     remove: async () => {
       await handleHook("session-end", event("SessionEnd", { reason: "other" }));
@@ -439,4 +449,35 @@ describe("the catalogs", { concurrency: SIDE_BY_SIDE }, () => {
       }
     });
   }
+});
+
+// What a repo sets in its gates file reaches the agent through the hook, and the command of the gate.
+describe("the settings of a repo", () => {
+  test("word a send-back whole once a session, and the report of a gate", async () => {
+    const entry = readCatalogs(CATALOG_DIR)
+      .flatMap((catalog) => (catalog.id === "typescript" ? catalog.entries : []))
+      .find(({ gate }) => gate.name === "no-new-suppressions");
+    assert.ok(entry, "the catalog has no gate no-new-suppressions");
+    const definition = { ...entry.definition, prompt: { replace: "Ask the owner before you silence a rule." } };
+    const agent = project(
+      "typescript",
+      [{ ...entry, definition }],
+      {},
+      { prompts: { sendBack: "Never edit src/gen." } },
+    );
+    try {
+      await agent.prompt();
+      agent.edit({ "src/add.ts": "// eslint-disable-next-line no-unused-vars\nexport const add = 1;\n" });
+      const first = (await agent.stop())?.reason ?? "";
+      assert.match(first, /settle a question first\.\n\nNever edit src\/gen\.\n\nTo leave a gate red/);
+      assert.match(first, /## no-new-suppressions\nAsk the owner before you silence a rule\.\nsrc\/add\.ts/);
+      assert.doesNotMatch(first, /New rule suppressions/);
+      const second = (await agent.stop(true))?.reason ?? "";
+      assert.match(second, /^Gates fail again: /);
+      assert.doesNotMatch(second, /Never edit src\/gen/);
+      assert.match(second, /## no-new-suppressions\nAsk the owner before you silence a rule\.\nsrc\/add\.ts/);
+    } finally {
+      await agent.remove();
+    }
+  });
 });

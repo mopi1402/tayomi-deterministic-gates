@@ -13,9 +13,14 @@ export interface Outcome {
   report: string | undefined;
   /** Stopped for lack of time: neither green nor red, since nobody knows what it would have said. */
   timedOut?: boolean;
+  /**
+   * The gate did not report: its command is missing or broke, its watch stopped. It still fails the turn, since
+   * nothing tells a gate the turn broke from one that broke before it, but the agent is told to repair it.
+   */
+  broken?: boolean;
 }
 
-/** A gate that judged the turn and found a problem: the only kind that sends the agent back. */
+/** A gate that judged the turn and found a problem, or that broke: the only kinds that send the agent back. */
 export function failed(outcome: Outcome): boolean {
   return !outcome.ok && !outcome.timedOut;
 }
@@ -38,6 +43,14 @@ function repoNode(root: string): string {
   const pinned = join(root, "node_modules", ".bin", "node");
   return executable(pinned) ? pinned : process.execPath;
 }
+/** Set for a gate whose prompt the repo replaces: its command leaves out the line it would tell the agent itself. */
+const PROMPT_REPLACED = "GATES_PROMPT_REPLACED";
+
+/** The report of an engine helper: its own line for the agent, unless the repo says another instead, then its list. */
+export function headed(own: string, lines: string[], env = process.env): string {
+  return [...(env[PROMPT_REPLACED] ? [] : [own]), ...lines].join("\n");
+}
+
 const MAX_OUTPUT_MB = 16;
 const ENGINE_PREFIX = "{engine}/";
 
@@ -190,6 +203,8 @@ interface Executed {
   output: string;
   ms: number;
   timedOut: boolean;
+  /** The command was never started: it is missing, or the engine cannot resolve it. */
+  cannotStart: boolean;
 }
 
 async function execute(root: string, gate: Gate, args: string[]): Promise<Executed> {
@@ -200,7 +215,13 @@ async function execute(root: string, gate: Gate, args: string[]): Promise<Execut
   try {
     command = commandOf(root, name);
   } catch (error) {
-    return { ok: false, output: messageOf(error), ms: performance.now() - started, timedOut: false };
+    return {
+      ok: false,
+      output: messageOf(error),
+      ms: performance.now() - started,
+      timedOut: false,
+      cannotStart: true,
+    };
   }
   return new Promise((resolve) => {
     execFile(
@@ -210,7 +231,7 @@ async function execute(root: string, gate: Gate, args: string[]): Promise<Execut
         cwd: root,
         timeout: gate.timeoutSeconds * 1000,
         maxBuffer: MAX_OUTPUT_MB * 1024 * 1024,
-        env: toolEnv(root),
+        env: { ...toolEnv(root), ...(gate.prompt?.replace ? { [PROMPT_REPLACED]: "1" } : {}) },
       },
       (error, stdout, stderr) => {
         resolve({
@@ -218,6 +239,7 @@ async function execute(root: string, gate: Gate, args: string[]): Promise<Execut
           output: outputOf(root, gate, command, error, `${stdout}${stderr}`),
           ms: performance.now() - started,
           timedOut: error?.killed === true && error.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
+          cannotStart: error?.code === "ENOENT",
         });
       },
     );
@@ -261,8 +283,8 @@ export async function wholeProject(
 }
 
 /**
- * Runs a gate on the turn. A compared gate fails on the lines of output the turn added, and on any exit code but 0:
- * the same crash at the start and at the end of a turn prints no new line. A gate out of time is neither.
+ * Runs a gate on the turn. A compared gate fails on the lines of output the turn added, and is broken on any exit
+ * code but 0: the same crash at the start and at the end of a turn prints no new line. A gate out of time is neither.
  */
 export async function check(
   root: string,
@@ -271,9 +293,11 @@ export async function check(
   turn: string,
   baseline: string | undefined,
 ): Promise<Outcome> {
-  const { ok, output, ms, timedOut } = await execute(root, gate, argumentsOf(gate, files, turn));
+  const { ok, output, ms, timedOut, cannotStart } = await execute(root, gate, argumentsOf(gate, files, turn));
   const ran = { name: gate.name, ms, report: ok ? output : undefined };
   if (timedOut) return { ...ran, ok, output, timedOut };
+  // A compared gate exits with 0 when it finds problems: any other code is its command that broke.
+  if (!ok && (cannotStart || isCompared(gate))) return { ...ran, ok, output, broken: true };
   if (!isCompared(gate) || !ok) return { ...ran, ok, output };
   return { ...ran, ...addedLines(gate, output, baseline, files) };
 }

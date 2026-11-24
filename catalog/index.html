@@ -40,7 +40,7 @@ summary { cursor: pointer; color: var(--muted); }
 <h1>Gate catalog</h1>
 <p>The gates worth copying into a repo. Nothing here runs by itself: the engine reads only the repo's <code>.gates.json</code>. Copy the definition of a gate there, install what it requires, and adapt its <code>files</code> to the layout of the repo.</p>
 <p>Generated from <code>catalog/*.json</code> by <code>pnpm catalog</code>: edit those files, never this page.</p>
-<nav><a href="#angular">Angular (4)</a><a href="#go">Go (6)</a><a href="#python">Python (3)</a><a href="#typescript">TypeScript (9)</a></nav>
+<nav><a href="#angular">Angular (4)</a><a href="#go">Go (6)</a><a href="#python">Python (3)</a><a href="#typescript">TypeScript (10)</a></nav>
 </header>
 <section id="angular">
 <h2>Angular</h2>
@@ -531,18 +531,37 @@ summary { cursor: pointer; color: var(--muted); }
 </article>
 <article id="typescript/no-new-suppressions">
 <h3><code>typescript/no-new-suppressions</code></h3>
-<p>Fails on the rule suppressions the turn added, never on the ones already there: eslint-disable, @ts-ignore, @ts-expect-error, @ts-nocheck, prettier-ignore, biome-ignore. The cheapest green is to silence the rule, and this is the gate that refuses it.</p>
+<p>Fails on the rule suppressions the turn added, never on the ones already there: eslint-disable, @ts-ignore, @ts-expect-error, @ts-nocheck, prettier-ignore, biome-ignore, stylelint-disable. The cheapest green is to silence the rule, and this is the gate that refuses it.</p>
 <dl>
 <dt>Runs</dt><dd><code>{engine}/src/helpers/new-suppressions.ts {turn} {files}</code></dd>
-<dt>When the turn changes</dt><dd><code>\.(ts|tsx|js|jsx|mjs|cjs)$</code></dd>
+<dt>When the turn changes</dt><dd><code>\.(ts|tsx|js|jsx|mjs|cjs|css|scss)$</code></dd>
 <dt>Requires</dt><dd><ul></ul></dd>
 </dl>
 <details><summary>Definition to copy into .gates.json</summary><pre><code>{
   &quot;name&quot;: &quot;no-new-suppressions&quot;,
   &quot;severity&quot;: &quot;error&quot;,
-  &quot;files&quot;: &quot;\\.(ts|tsx|js|jsx|mjs|cjs)$&quot;,
+  &quot;files&quot;: &quot;\\.(ts|tsx|js|jsx|mjs|cjs|css|scss)$&quot;,
   &quot;run&quot;: [
     &quot;{engine}/src/helpers/new-suppressions.ts&quot;,
+    &quot;{turn}&quot;,
+    &quot;{files}&quot;
+  ]
+}</code></pre></details>
+</article>
+<article id="typescript/no-new-bulk-suppressions">
+<h3><code>typescript/no-new-bulk-suppressions</code></h3>
+<p>Fails when the turn raised a count of an ESLint suppressions file, the one eslint --suppress-all writes: every violation of now goes into it, and the lint turns green with no comment in the code. A file the turn created or moved may take over the counts that left another, as long as the file holds no more of the rule than before: any other count that rises fails. Give its files the suppressions file of the repo, wherever --suppressions-location puts it.</p>
+<dl>
+<dt>Runs</dt><dd><code>{engine}/src/helpers/bulk-suppressions.ts {turn} {files}</code></dd>
+<dt>When the turn changes</dt><dd><code>(^|/)eslint-suppressions\.json$</code></dd>
+<dt>Requires</dt><dd><ul></ul></dd>
+</dl>
+<details><summary>Definition to copy into .gates.json</summary><pre><code>{
+  &quot;name&quot;: &quot;no-new-bulk-suppressions&quot;,
+  &quot;severity&quot;: &quot;error&quot;,
+  &quot;files&quot;: &quot;(^|/)eslint-suppressions\\.json$&quot;,
+  &quot;run&quot;: [
+    &quot;{engine}/src/helpers/bulk-suppressions.ts&quot;,
     &quot;{turn}&quot;,
     &quot;{files}&quot;
   ]

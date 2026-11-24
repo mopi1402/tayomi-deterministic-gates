@@ -1,11 +1,28 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { changedGatesFiles, type Gate, type Gates, gatesOf, isCompared, keepsWatch, readGatesFiles } from "./config.ts";
+import {
+  changedGatesFiles,
+  type Gate,
+  type Gates,
+  gatesOf,
+  isCompared,
+  keepsWatch,
+  type Prompts,
+  readGatesFiles,
+} from "./config.ts";
 import { cachedReports, cacheReports } from "./report-cache.ts";
 import { check, filesOf, givenFiles, missingTool, type Outcome, wholeProject } from "./run.ts";
 import { changedSince, emptyCommit, hasCommit, lastCommit, snapshot, workingTree } from "./snapshot.ts";
 import { readTurn, type TurnState, writeTurn } from "./turn-state.ts";
 import { judgeWatch, keepWatch, startWatch, TURN_START_MS, watchReport } from "./watch.ts";
+
+/** What the repo says of what the agent is sent: the prompts of the whole check, and its gates, for their own. */
+interface Wording {
+  prompts?: Prompts;
+  gates?: Pick<Gate, "name" | "omitLines" | "maxReportChars" | "prompt">[];
+  /** The most characters the reports of a send-back hold, all together. */
+  maxTotalReportChars?: number;
+}
 
 export interface CheckedTurn {
   changed: string[];
@@ -14,6 +31,8 @@ export interface CheckedTurn {
   ms: number;
   note?: string;
   showAllPasses?: boolean;
+  /** As the gates the check ran with word it. */
+  wording?: Wording;
 }
 
 /** A gate of the turn, with its outcome when it ran. */
@@ -131,7 +150,7 @@ function checkedTurn(
   results: Result[],
   started: number,
   notes: string[],
-  showAllPasses: boolean,
+  { gates, prompts, maxTotalReportChars, showAllPasses }: Gates,
 ): CheckedTurn {
   return {
     changed,
@@ -140,6 +159,7 @@ function checkedTurn(
     ms: performance.now() - started,
     note: notes.join("\n") || undefined,
     ...(showAllPasses ? { showAllPasses } : {}),
+    wording: { gates, prompts, maxTotalReportChars },
   };
 }
 
@@ -152,9 +172,9 @@ export async function checkAll(root: string): Promise<CheckedTurn> {
   const started = performance.now();
   const empty = emptyCommit(root);
   const files = changedSince(root, empty);
-  const { gates, refused, showAllPasses } = gatesOf(readGatesFiles(root));
-  const results = await runGates(root, gates, files, empty, () => "");
-  return checkedTurn(files, results, started, refusedNotes(refused), showAllPasses);
+  const config = gatesOf(readGatesFiles(root));
+  const results = await runGates(root, config.gates, files, empty, () => "");
+  return checkedTurn(files, results, started, refusedNotes(config.refused), config);
 }
 
 // A report holds for the tree a turn ends on only if the gate ran clean on the whole project. A gate that failed
@@ -162,7 +182,8 @@ export async function checkAll(root: string): Promise<CheckedTurn> {
 // keeps none: it may still read a changed file its pattern misses, as knip reads tsconfig.json.
 function endReports(results: Result[], baselines: Baselines) {
   return results.flatMap(({ gate, outcome }) => {
-    if (!isCompared(gate) || !outcome) return [];
+    // A gate that could not run says nothing of the tree: the report it started from was a crash, or may be stale.
+    if (!isCompared(gate) || !outcome || outcome.broken) return [];
     const report = outcome.ok ? outcome.report : baselines(gate);
     return report === undefined ? [] : [[gate, report] as const];
   });
@@ -196,7 +217,8 @@ export async function checkTurn(session: string, root: string): Promise<CheckedT
   const started = performance.now();
   const end = workingTree(root);
   const changed = changedSince(root, turn.start, end);
-  const { gates, refused, showAllPasses } = gatesOf(turn.config);
+  const config = gatesOf(turn.config);
+  const { gates, refused } = config;
   const missing = missingTools(root, gates);
   for (const gate of gates) if (keepsWatch(gate)) keepWatch(root, gate);
   const results = await runGates(root, runnable(gates, missing), changed, turn.start, baselines, session);
@@ -222,7 +244,7 @@ export async function checkTurn(session: string, root: string): Promise<CheckedT
     ...refusedNotes(refused),
     ...notRun,
   ];
-  return checkedTurn(changed, results, started, notes, showAllPasses);
+  return checkedTurn(changed, results, started, notes, config);
 }
 
 function refusedNotes(refused: Gates["refused"]): string[] {

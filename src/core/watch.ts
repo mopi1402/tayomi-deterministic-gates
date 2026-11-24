@@ -61,13 +61,18 @@ export function keepWatch(root: string, gate: Gate): void {
   if (existsSync(folder)) touch(folder);
 }
 
+// What the folders of the watches of a gate of a repo start with, whatever version of the engine started them.
+function watchesOf(root: string, gate: Gate): string {
+  const key = createHash("sha256").update(`${root}\0${gate.name}`).digest("hex").slice(0, 16);
+  return `${PREFIX}${key}-`;
+}
+
 /**
  * Where a watch keeps its process, its output and the sessions that use it, outside the repo: one per repo, gate and
  * engine version, since a helper of the engine may print its cycles otherwise from one version to the next.
  */
 function folderOf(root: string, gate: Gate): string {
-  const key = createHash("sha256").update(`${root}\0${gate.name}\0${ENGINE_VERSION}`).digest("hex").slice(0, 16);
-  return join(tmpdir(), `${PREFIX}${key}`);
+  return join(tmpdir(), `${watchesOf(root, gate)}${ENGINE_VERSION}`);
 }
 
 // A file per session that uses the watch: two hooks at once each write their own, and neither loses the other's.
@@ -75,9 +80,13 @@ function sessionFile(folder: string, session: string): string {
   return join(folder, "sessions", session.replace(/[^\w-]/g, ""));
 }
 
-function register(folder: string, session: string): void {
+/** Records that the session uses the watch, and says whether it is the first time it does. */
+function register(folder: string, session: string): boolean {
+  const file = sessionFile(folder, session);
+  if (existsSync(file)) return false;
   mkdirSync(join(folder, "sessions"), { recursive: true });
-  writeFileSync(sessionFile(folder, session), "");
+  writeFileSync(file, "");
+  return true;
 }
 
 /** The process of the watch, as the engine recorded it when it started it, or nothing when it never did. */
@@ -130,7 +139,7 @@ export function startWatch(session: string, root: string, gate: WatchedGate): vo
   mkdirSync(folder, { recursive: true });
   touch(folder);
   // The sessions of a watch that starts again still use it.
-  register(folder, session);
+  if (register(folder, session)) leaveOtherVersions(session, root, gate);
   if (stateOf(folder) === "running" || !lockStart(folder)) return;
   try {
     // Another hook may have started it between the look above and the lock.
@@ -138,6 +147,25 @@ export function startWatch(session: string, root: string, gate: WatchedGate): vo
   } finally {
     unlockStart(folder);
   }
+}
+
+/**
+ * The session leaves the watches other versions of the engine started for this gate of this repo, now that it uses
+ * the one of this version: after an update of the engine, the watch of the version before would otherwise run beside
+ * the new one, until the session ends or it stops for idleness. A session still on that version keeps its watch, and
+ * the watch of another repo, such as another worktree, is not one of them.
+ */
+function leaveOtherVersions(session: string, root: string, gate: Gate): void {
+  const tmp = tmpdir();
+  const prefix = watchesOf(root, gate);
+  for (const entry of readDir(tmp))
+    if (entry.startsWith(prefix) && entry !== `${prefix}${ENGINE_VERSION}`) leave(join(tmp, entry), session);
+}
+
+/** The session no longer uses the watch, which stops once no session does: the watch and every process it started. */
+function leave(folder: string, session: string): void {
+  rmSync(sessionFile(folder, session), { force: true });
+  if (!readDir(join(folder, "sessions")).length) stop(folder);
 }
 
 /** The files of the repo the watch lists only as it starts, one per line. */
@@ -362,7 +390,7 @@ function readDir(folder: string): string[] {
  * the gate: out of time, neither green nor red, never judged on an older cycle. The watch then owes a cycle for these
  * files, which the next stop it answers asks for with its own: a change it missed would otherwise stay unseen until
  * the file changes again. Only a stop pays that debt, never the report of a turn start, which would make old a
- * failure no turn was judged on. A watch that stopped fails, with the last lines it printed.
+ * failure no turn was judged on. A watch that stopped is a broken gate, with the last lines it printed.
  */
 export async function judgeWatch(
   session: string,
@@ -377,7 +405,7 @@ export async function judgeWatch(
   const settled = await settle(session, root, gate, asked, gate.timeoutSeconds * 1000);
   const { name } = gate;
   const { ms } = settled;
-  if ("stopped" in settled) return { name, ok: false, ms, output: settled.stopped, report: undefined };
+  if ("stopped" in settled) return { name, ok: false, ms, output: settled.stopped, report: undefined, broken: true };
   if (!("cycle" in settled)) {
     owe(folder, files);
     const output = `The watch opened no cycle for the turn within ${gate.timeoutSeconds} s, so not judged. Make it faster, or move it to CI.`;
@@ -416,10 +444,7 @@ export function endSession(session: string): void {
   for (const entry of readdirSync(tmpdir())) {
     if (!entry.startsWith(PREFIX)) continue;
     const folder = join(tmpdir(), entry);
-    const file = sessionFile(folder, session);
-    if (!existsSync(file)) continue;
-    rmSync(file, { force: true });
-    if (!readdirSync(join(folder, "sessions")).length) stop(folder);
+    if (existsSync(sessionFile(folder, session))) leave(folder, session);
   }
 }
 

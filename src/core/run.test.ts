@@ -6,13 +6,14 @@ import { afterEach, beforeEach, describe, test } from "node:test";
 import type { Gate } from "./config.ts";
 import {
   argumentsOf,
-  type Command,
   check,
   commandOf,
   failed,
   filesOf,
+  headed,
   missingTool,
   newLines,
+  type Command,
   wholeProject,
 } from "./run.ts";
 
@@ -206,6 +207,7 @@ describe("check, on any language", () => {
     const missing = { ...LINT, run: ["no-such-tool", "{files}"] };
     const outcome = await check(root, missing, ["a.ts"], "abc", undefined);
     assert.equal(outcome.ok, false);
+    assert.equal(outcome.broken, true);
     assert.match(outcome.output, /no-such-tool is not installed/);
   });
 
@@ -231,6 +233,7 @@ describe("check, compared with the turn start", () => {
     assert.equal(outcome.ok, false);
     assert.equal(outcome.output, "fresh");
     assert.equal(outcome.report, "old\nfresh");
+    assert.equal(outcome.broken, undefined);
   });
 
   test("fails when the command breaks, even with the output it printed as the turn started", async () => {
@@ -239,6 +242,7 @@ describe("check, compared with the turn start", () => {
     assert.equal(outcome.ok, false);
     assert.equal(outcome.output, "boom");
     assert.equal(outcome.report, undefined);
+    assert.equal(outcome.broken, true);
   });
 
   test("neither passes nor fails when the command runs out of time, even if it did as the turn started", async () => {
@@ -249,5 +253,12 @@ describe("check, compared with the turn start", () => {
     assert.equal(outcome.timedOut, true);
     assert.equal(failed(outcome), false);
     assert.match(outcome.output, /Out of time after 0\.2 s, so not judged/);
+  });
+});
+
+describe("headed", () => {
+  test("heads the list of a helper with its own line, unless the repo replaces the prompt of the gate", () => {
+    assert.equal(headed("New clones: factor out.", ["a ~ b"], {}), "New clones: factor out.\na ~ b");
+    assert.equal(headed("New clones: factor out.", ["a ~ b"], { GATES_PROMPT_REPLACED: "1" }), "a ~ b");
   });
 });

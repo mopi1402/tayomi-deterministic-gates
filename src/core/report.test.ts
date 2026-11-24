@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, test } from "node:test";
 import { stripVTControlCharacters } from "node:util";
 import { outcome, ran } from "../testing.ts";
-import { duration, excerpt, failures, summary } from "./report.ts";
+import { duration, excerpt, failures, results, summary, toolsToInstall } from "./report.ts";
 
 const shown = (text: string) => stripVTControlCharacters(text).split("\n");
 
@@ -24,6 +24,30 @@ describe("excerpt", () => {
     assert.ok(kept.endsWith("last line"));
     assert.match(kept, /characters cut/);
     assert.ok(kept.length < 4100);
+  });
+
+  test("cuts a long list between two lines, and counts the lines cut", () => {
+    const lines = Array.from({ length: 200 }, (_, at) => `src/file-${at}.ts:1-9 ~ src/other-${at}.ts:20-28`);
+    const kept = excerpt(lines.join("\n")).split("\n");
+    const cut = kept.findIndex((line) => line.startsWith("[..."));
+    assert.equal(kept[cut], `[... ${200 - (kept.length - 1)} lines cut ...]`);
+    assert.deepEqual(kept.slice(0, cut), lines.slice(0, cut));
+    assert.deepEqual(kept.slice(cut + 1), lines.slice(cut + 1 - kept.length));
+    assert.ok(kept.join("\n").length < 4100);
+  });
+
+  test("cuts inside a line too long to keep whole, where dropping it would leave almost nothing", () => {
+    const kept = excerpt(`FAIL test a\nAssertionError: ${"x".repeat(10_000)}\n1 failed`);
+    assert.ok(kept.startsWith("FAIL test a\nAssertionError: xxx"));
+    assert.ok(kept.endsWith("xxx\n1 failed"));
+    assert.match(kept, /characters cut/);
+    assert.ok(kept.length > 3900 && kept.length < 4100, String(kept.length));
+  });
+
+  test("keeps as many characters as it is given", () => {
+    const lines = Array.from({ length: 200 }, (_, at) => `clone ${at}`);
+    assert.ok(excerpt(lines.join("\n"), 300).length < 340);
+    assert.equal(excerpt(lines.join("\n"), 100_000), lines.join("\n"));
   });
 });
 
@@ -88,6 +112,8 @@ describe("summary", () => {
 });
 
 describe("failures", () => {
+  const listed = (count: number, line: string) => Array.from({ length: count }, (_, at) => `${line} ${at}`).join("\n");
+
   test("gives the report of each failed gate only", () => {
     const text = failures(ran([outcome("lint", false, 10), outcome("dead", true, 10)]));
     assert.match(text, /## lint\nlint report/);
@@ -107,5 +133,137 @@ describe("failures", () => {
     const note = "the turn changed .gates.json: checked with the gates as the turn started";
     const text = failures({ ...ran([outcome("lint", false, 10)]), note });
     assert.ok(text.includes(`\n\n${note}\n\n## lint`));
+  });
+
+  test("adds the prompt of the repo to what it tells the agent, or says it instead, and always how to waive", () => {
+    const turn = ran([outcome("lint", false, 10)]);
+    const added = failures({
+      ...turn,
+      wording: { prompts: { sendBack: { text: "Ask before a refactor.", replace: false } } },
+    });
+    assert.match(added, /settle a question first\.\n\nAsk before a refactor\.\n\nTo leave a gate red, waive it/);
+    const replaced = failures({
+      ...turn,
+      wording: { prompts: { sendBack: { text: "Ask the owner.", replace: true } } },
+    });
+    assert.ok(replaced.startsWith("Ask the owner.\n\nTo leave a gate red, waive it"));
+    assert.doesNotMatch(replaced, /Fix the code, never the check/);
+    assert.match(replaced, /^\[deterministic-gates:<gate>\]: waive "<reason>"$/m);
+  });
+
+  test("gives the prompt of a gate under its name, before its report", () => {
+    const turn = ran([outcome("lint", false, 10), outcome("tests", false, 10)]);
+    const gates = [{ name: "lint", prompt: { text: "Never edit src/generated.", replace: false } }];
+    const text = failures({ ...turn, wording: { gates } });
+    assert.match(text, /## lint\nNever edit src\/generated\.\nlint report/);
+    assert.match(text, /## tests\ntests report/);
+  });
+
+  test("keeps of the report of a gate the characters the repo gives it", () => {
+    const long = { ...outcome("clones", false), output: listed(200, "clone") };
+    const text = failures({ ...ran([long]), wording: { gates: [{ name: "clones", maxReportChars: 300 }] } });
+    assert.match(text, /## clones\nclone 0\n/);
+    assert.match(text, /lines cut/);
+    assert.ok(text.slice(text.indexOf("## clones")).length < 360);
+  });
+
+  test("leaves out of a report the lines the gate omits, unless none would be left", () => {
+    const stack = {
+      ...outcome("lint", false),
+      output: "TypeError: x is not a function\n    at f (a.ts:1)\n    at g (b.ts:2)",
+    };
+    const omitting = (omitLines: string) =>
+      failures({ ...ran([stack]), wording: { gates: [{ name: "lint", omitLines }] } });
+    assert.ok(omitting("^\\s+at ").endsWith("## lint\nTypeError: x is not a function"));
+    assert.ok(omitting(".").endsWith(`## lint\n${stack.output}`));
+  });
+
+  test("shares the characters of a send-back between its reports, a short one whole and the long ones cut alike", () => {
+    const long = (name: string) => ({ ...outcome(name, false), output: listed(300, `${name} problem`) });
+    const turn = ran([long("lint"), outcome("dead", false), long("tests")]);
+    const text = failures({ ...turn, wording: { maxTotalReportChars: 1000 } });
+    const [, lint = "", dead = "", tests = ""] = text.split("## ");
+    assert.equal(dead.trim(), "dead\ndead report");
+    for (const report of [lint, tests]) assert.ok(report.length > 400 && report.length < 560, String(report.length));
+    assert.match(lint, /lines cut/);
+  });
+
+  test("says it in one line once the session was told how to act, and still how to waive", () => {
+    const text = failures(ran([outcome("lint", false, 10)]), ["This is send-back 2 of 5."], true);
+    const [head = "", ...rest] = text.split("\n\n");
+    assert.ok(head.length < 200, String(head.length));
+    assert.match(head, /\[deterministic-gates:<gate>\]: waive "<reason>"/);
+    assert.doesNotMatch(text, /a silenced rule/);
+    assert.deepEqual(rest, ["This is send-back 2 of 5.", "## lint\nlint report"]);
+  });
+
+  test("tells the agent to repair a gate that broke, in the words of the engine or of the repo", () => {
+    const turn = ran([{ ...outcome("types", false), broken: true }, outcome("lint", false)]);
+    const text = failures(turn);
+    assert.match(
+      text,
+      /## types\nThis gate broke instead of reporting: repair what stops it from running.*\ntypes report/,
+    );
+    assert.match(text, /## lint\nlint report/);
+    const replaced = failures({
+      ...turn,
+      wording: { prompts: { brokenGate: { text: "Run pnpm install.", replace: true } } },
+    });
+    assert.match(replaced, /## types\nRun pnpm install\.\ntypes report/);
+  });
+});
+
+describe("toolsToInstall", () => {
+  test("names the missing tools, then asks to install them unless the repo says otherwise", () => {
+    assert.match(toolsToInstall(["lint: eslint is not installed"]), /- lint: eslint is not installed\nInstall these/);
+    const added = toolsToInstall(["lint: x"], { text: "Use pnpm.", replace: false });
+    assert.match(added, /every other gate still runs\.\nUse pnpm\.$/);
+    assert.equal(
+      toolsToInstall(["lint: x"], { text: "Tell the owner.", replace: true }),
+      "Some gates of this repo cannot run on this machine, for a missing tool:\n- lint: x\nTell the owner.",
+    );
+  });
+});
+
+describe("results", () => {
+  test("give each gate of a check a status, with its report when it failed or broke, for a tool to read", () => {
+    const turn = {
+      ...ran(
+        [
+          outcome("lint", false, 900),
+          outcome("typecheck", true, 1100),
+          { ...outcome("tests", false, 40), output: "Cannot find module", broken: true },
+          { ...outcome("clones", false, 5000), timedOut: true },
+        ],
+        ["format"],
+        7040,
+      ),
+      note: "dead not run, its entry is wrong: run is missing\nthe turn changed .gates.json",
+    };
+    assert.deepEqual(results(turn), {
+      ok: false,
+      durationMs: 7040,
+      gates: [
+        { name: "lint", status: "failed", durationMs: 900, report: "lint report" },
+        { name: "typecheck", status: "passed", durationMs: 1100 },
+        { name: "tests", status: "broken", durationMs: 40, report: "Cannot find module" },
+        { name: "clones", status: "timed-out", durationMs: 5000 },
+        { name: "format", status: "skipped" },
+      ],
+      notes: ["dead not run, its entry is wrong: run is missing", "the turn changed .gates.json"],
+    });
+  });
+
+  test("are ok when no gate failed, a gate out of time included", () => {
+    const turn = ran([outcome("lint", true, 10), { ...outcome("clones", false, 5000), timedOut: true }]);
+    assert.deepEqual(results(turn), {
+      ok: true,
+      durationMs: 20,
+      gates: [
+        { name: "lint", status: "passed", durationMs: 10 },
+        { name: "clones", status: "timed-out", durationMs: 5000 },
+      ],
+      notes: [],
+    });
   });
 });

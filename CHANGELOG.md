@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.9.0
+
+### Fixed
+
+- After an update of the engine, a session leaves the watch the version before started for a gate, which stops once no session uses it, where it ran beside the new one until the session ended
+- `no-new-suppressions` reports a suppression that says the same as one already in the file
+- `no-new-suppressions` no longer reports an old suppression at the end of a line the turn changed
+- A gate that broke, by its command or its watch, tells the agent to repair what stops it from running
+
+### Added
+
+- `no-new-bulk-suppressions` in the TypeScript catalog fails when the turn raised a count of an ESLint suppressions file
+- `prompts` in a gates file and `prompt` on a gate add a text of the repo to what the agent is told, or replace it
+- `maxReportChars`, for the whole check or for a gate, sets how much of a report the agent is sent
+- `omitLines` on a gate leaves lines of its report out of what the agent is sent
+- `check --format json` prints the check for a tool to read, each gate with its status
+
+### Changed
+
+- `no-new-suppressions` knows `stylelint-disable`, and the gate of the TypeScript catalog reads `.css` and `.scss` files
+- `no-new-clones` tells the agent to reuse the code already there, or to factor it out
+- A long report is cut between two lines when they are short enough, and says how many lines it cut
+- The agent is told how to act on a send-back once a session in a repo, and in one line after, until the session starts again or compacts
+- A send-back holds 4000 characters of reports at most, all gates together: `maxTotalReportChars` sets it
+
 ## 0.8.2
 
 ### Changed

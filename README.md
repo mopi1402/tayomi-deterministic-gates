@@ -91,7 +91,7 @@ To check the whole repo, as before adopting the gates, in a pre-push hook or in 
 npx @tayomi/deterministic-gates check
 ```
 
-Every gate runs on every file that matches, and the command exits with 1 when a gate fails.
+Every gate runs on every file that matches, and the command exits with 1 when a gate fails. With `--format json`, it prints each gate and its status for a tool to read: see [the whole check](docs/turn.md#the-whole-check).
 
 ## Develop
 

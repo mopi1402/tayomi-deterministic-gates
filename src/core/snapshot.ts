@@ -99,6 +99,21 @@ export function hasCommit(root: string, commit: string): boolean {
   }
 }
 
+/** A file as a commit holds it, or nothing when the commit does not have it. */
+export function fileAt(root: string, commit: string, file: string): string | undefined {
+  try {
+    // However long: past the default megabyte, git would read as a commit that does not have the file.
+    return execFileSync("git", ["show", `${commit}:${file}`], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: "pipe",
+      maxBuffer: Infinity,
+    });
+  } catch {
+    return undefined;
+  }
+}
+
 /** The files that differ between two commits or trees, the deleted ones included. */
 export function changedSince(root: string, start: string, end = workingTree(root)): string[] {
   return paths(git(root, ["diff", "-z", "--name-only", start, end])).sort();

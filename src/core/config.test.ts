@@ -79,6 +79,64 @@ describe("parseGates", () => {
       assert.throws(() => readGates(file(lint), JSON.stringify({ maxSendBacks: wrong })), /whole number, 0 or more/);
   });
 
+  test("keeps 4000 characters of a report unless the repo or the gate says otherwise, the gate first", () => {
+    assert.equal(parseGates(file(lint))[0]?.maxReportChars, undefined);
+    const shared = JSON.stringify({
+      gates: [lint, { ...lint, name: "clones", maxReportChars: 800 }],
+      maxReportChars: 2000,
+    });
+    assert.deepEqual(
+      parseGates(shared).map(({ maxReportChars }) => maxReportChars),
+      [2000, 800],
+    );
+    assert.equal(parseGates(shared, JSON.stringify({ maxReportChars: 500 }))[0]?.maxReportChars, 500);
+    for (const wrong of [0, 1.5, "300"]) {
+      assert.throws(
+        () => parseGates(JSON.stringify({ gates: [lint], maxReportChars: wrong })),
+        /maxReportChars is a whole number/,
+      );
+      assert.throws(() => parseGates(file({ ...lint, maxReportChars: wrong })), /maxReportChars is a whole number/);
+    }
+  });
+
+  test("reads the lines of its report a gate never sends the agent", () => {
+    assert.equal(parseGates(file({ ...lint, omitLines: "^\\s+at " }))[0]?.omitLines, "^\\s+at ");
+    assert.throws(() => parseGates(file({ ...lint, omitLines: "(" })), /omitLines is a regular expression/);
+  });
+
+  test("sends 4000 characters of reports at most unless told otherwise, with the local file over the shared one", () => {
+    assert.equal(readGates(file(lint)).maxTotalReportChars, 4000);
+    const shared = JSON.stringify({ gates: [lint], maxTotalReportChars: 6000 });
+    assert.equal(readGates(shared).maxTotalReportChars, 6000);
+    assert.equal(readGates(shared, JSON.stringify({ maxTotalReportChars: 900 })).maxTotalReportChars, 900);
+    for (const wrong of [0, 1.5, "300"])
+      assert.throws(
+        () => readGates(JSON.stringify({ maxTotalReportChars: wrong })),
+        /maxTotalReportChars is a whole number/,
+      );
+  });
+
+  test("reads the prompt of a gate: a text to add to what the agent is told, or one to replace it", () => {
+    const [added] = parseGates(file({ ...lint, prompt: "Never edit src/generated." }));
+    assert.deepEqual(added?.prompt, { text: "Never edit src/generated.", replace: false });
+    const [replaced] = parseGates(file({ ...lint, prompt: { replace: "Waive it." } }));
+    assert.deepEqual(replaced?.prompt, { text: "Waive it.", replace: true });
+    for (const wrong of [1, "", { replace: 1 }, { replace: "x", add: "y" }])
+      assert.throws(() => parseGates(file({ ...lint, prompt: wrong })), /prompt is a text to add/);
+  });
+
+  test("reads the prompts of the whole check, each key of the local file over the shared one", () => {
+    assert.deepEqual(readGates(file(lint)).prompts, {});
+    const shared = JSON.stringify({ gates: [lint], prompts: { sendBack: "Ask first.", missingTools: "Use pnpm." } });
+    const local = JSON.stringify({ prompts: { sendBack: { replace: "Stop." } } });
+    assert.deepEqual(readGates(shared, local).prompts, {
+      sendBack: { text: "Stop.", replace: true },
+      missingTools: { text: "Use pnpm.", replace: false },
+    });
+    assert.throws(() => readGates(JSON.stringify({ prompts: { conduct: "x" } })), /prompts holds "sendBack"/);
+    assert.throws(() => readGates(JSON.stringify({ prompts: { sendBack: 1 } })), /prompts.sendBack is a text to add/);
+  });
+
   test("refuses a compared gate given the files, since it reads the whole project", () => {
     const dead = { ...lint, run: ["knip", "{files}"], compare: "turn-start" };
     assert.throws(() => parseGates(file(dead)), /takes no \{files\}/);

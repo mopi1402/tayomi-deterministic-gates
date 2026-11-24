@@ -10,6 +10,9 @@ const LOCAL_GATES_FILE = ".gates.local.json";
 const DEFAULT_MAX_TIMEOUT_SECONDS = 45;
 // The times a turn sends the agent back: enough for a fix that breaks another gate, never a loop.
 const DEFAULT_MAX_SEND_BACKS = 5;
+// The characters of reports a send-back holds, all gates together: what one gate may send alone. The agent fixes
+// the first problems, and the next check shows it what is left.
+const DEFAULT_MAX_TOTAL_REPORT_CHARS = 4000;
 const FIELDS = new Set([
   "name",
   "severity",
@@ -20,12 +23,38 @@ const FIELDS = new Set([
   "lineKey",
   "timeoutSeconds",
   "watch",
+  "prompt",
+  "maxReportChars",
+  "omitLines",
 ]);
 const WATCH_FIELDS = new Set(["run", "cycleStart", "cycleEnd", "failed", "sync", "frozen"]);
 
 /** In the arguments of a gate: the changed files it looks at, and the commit of the turn start. */
 export const FILES = "{files}";
 export const TURN = "{turn}";
+
+/**
+ * A text of the repo for the agent, where the engine has one of its own: added after it, or in its place.
+ */
+export interface Prompt {
+  text: string;
+  replace: boolean;
+}
+
+/**
+ * What the engine tells the agent that a repo may word again: as it sends it back, as it asks for missing tools, and
+ * with the report of a gate the turn broke.
+ */
+const PROMPTS = ["sendBack", "missingTools", "brokenGate"] as const;
+export type Prompts = Partial<Record<(typeof PROMPTS)[number], Prompt>>;
+
+function toPrompt(value: unknown): Prompt | undefined {
+  if (typeof value === "string" && value) return { text: value, replace: false };
+  if (!isRecord(value) || Object.keys(value).join() !== "replace") return undefined;
+  return typeof value.replace === "string" && value.replace ? { text: value.replace, replace: true } : undefined;
+}
+
+const PROMPT_SHAPE = 'a text to add to what the agent is told, or {"replace": "a text"} to say it instead';
 
 export interface Gate {
   name: string;
@@ -38,6 +67,12 @@ export interface Gate {
   lineKey?: string;
   timeoutSeconds: number;
   watch?: Watch;
+  /** The most characters of its report the agent is sent, when the repo or the gate says: 4000 otherwise. */
+  maxReportChars?: number;
+  /** The lines of its report the agent is never sent, such as the frames of a stack. They change no verdict. */
+  omitLines?: string;
+  /** What the agent is told with the report of the gate. Replaced, an engine helper leaves its own line out. */
+  prompt?: Prompt;
 }
 
 /**
@@ -84,6 +119,9 @@ interface GatesFile {
   maxTimeoutSeconds?: unknown;
   showAllPasses?: unknown;
   maxSendBacks?: unknown;
+  maxReportChars?: unknown;
+  maxTotalReportChars?: unknown;
+  prompts?: unknown;
 }
 
 function fileOf(text: string | undefined, file: string): GatesFile {
@@ -99,12 +137,17 @@ function fileOf(text: string | undefined, file: string): GatesFile {
     maxTimeoutSeconds,
     showAllPasses,
     maxSendBacks,
+    maxReportChars,
+    maxTotalReportChars,
+    prompts,
     ...others
   } = isRecord(parsed) ? parsed : { others: true };
   if (!Array.isArray(gates) || Object.keys(others).length)
     throw new Error(
       `${file} holds "gates", a list of gates, "maxTimeoutSeconds", the most seconds a gate may take, ` +
-        `"showAllPasses", to name every green gate, and "maxSendBacks", the most times a turn sends the agent back.`,
+        `"showAllPasses", to name every green gate, "maxSendBacks", the most times a turn sends the agent back, ` +
+        `"maxReportChars", the most characters of a report the agent is sent, "maxTotalReportChars", the most of ` +
+        `all its reports together, and "prompts", what the agent is told.`,
     );
   const entries = gates.map((entry: unknown) => {
     if (!isRecord(entry) || typeof entry.name !== "string") throw new Error(`${file}: every gate has a name.`);
@@ -115,7 +158,42 @@ function fileOf(text: string | undefined, file: string): GatesFile {
     ...(maxTimeoutSeconds === undefined ? {} : { maxTimeoutSeconds }),
     ...(showAllPasses === undefined ? {} : { showAllPasses }),
     ...(maxSendBacks === undefined ? {} : { maxSendBacks }),
+    ...(maxReportChars === undefined ? {} : { maxReportChars }),
+    ...(maxTotalReportChars === undefined ? {} : { maxTotalReportChars }),
+    ...(prompts === undefined ? {} : { prompts }),
   };
+}
+
+function maxTotalReportCharsOf(shared: GatesFile, local: GatesFile): number {
+  const max = local.maxTotalReportChars ?? shared.maxTotalReportChars ?? DEFAULT_MAX_TOTAL_REPORT_CHARS;
+  if (!isReportChars(max)) throw new Error("maxTotalReportChars is a whole number, 1 or more.");
+  return max;
+}
+
+const REPORT_CHARS_SHAPE = "maxReportChars is a whole number, 1 or more";
+
+function isReportChars(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value > 0;
+}
+
+// Nothing unless a file says: the report then keeps the characters the engine gives every gate.
+function maxReportCharsOf(shared: GatesFile, local: GatesFile): number | undefined {
+  const max = local.maxReportChars ?? shared.maxReportChars;
+  if (max !== undefined && !isReportChars(max)) throw new Error(`${REPORT_CHARS_SHAPE}.`);
+  return max;
+}
+
+function promptsOf({ prompts = {} }: GatesFile): Prompts {
+  const known = PROMPTS.map((key) => `"${key}"`).join(", ");
+  if (!isRecord(prompts) || Object.keys(prompts).some((key) => !PROMPTS.some((prompt) => prompt === key)))
+    throw new Error(`prompts holds ${known}.`);
+  return Object.fromEntries(
+    Object.entries(prompts).map(([key, value]) => {
+      const prompt = toPrompt(value);
+      if (prompt === undefined) throw new Error(`prompts.${key} is ${PROMPT_SHAPE}.`);
+      return [key, prompt];
+    }),
+  );
 }
 
 // The local file's own value wins, as for the fields of a gate.
@@ -175,7 +253,7 @@ function toWatch(watch: unknown, compared: boolean): Watch {
   };
 }
 
-function toGate(entry: Entry, maxTimeoutSeconds: number): Gate {
+function toGate(entry: Entry, maxTimeoutSeconds: number, reportChars: number | undefined): Gate {
   const {
     name,
     severity,
@@ -185,7 +263,10 @@ function toGate(entry: Entry, maxTimeoutSeconds: number): Gate {
     ignoreLines,
     lineKey,
     watch,
+    prompt,
+    omitLines,
     timeoutSeconds = maxTimeoutSeconds,
+    maxReportChars = reportChars,
   } = entry;
   const unknown = Object.keys(entry).find((key) => !FIELDS.has(key));
   if (unknown !== undefined) refuse(`unknown field ${unknown}`);
@@ -202,6 +283,9 @@ function toGate(entry: Entry, maxTimeoutSeconds: number): Gate {
   if (lineKey !== undefined && compare === undefined)
     refuse("lineKey tells apart the lines of a compared gate: it takes compare");
   if (typeof timeoutSeconds !== "number" || timeoutSeconds <= 0) refuse("timeoutSeconds is a positive number");
+  if (maxReportChars !== undefined && !isReportChars(maxReportChars)) refuse(REPORT_CHARS_SHAPE);
+  if (omitLines !== undefined && !isPattern(omitLines)) refuse("omitLines is a regular expression");
+  const told = prompt === undefined ? undefined : (toPrompt(prompt) ?? refuse(`prompt is ${PROMPT_SHAPE}`));
   return {
     name,
     severity,
@@ -213,6 +297,9 @@ function toGate(entry: Entry, maxTimeoutSeconds: number): Gate {
     ...(ignoreLines === undefined ? {} : { ignoreLines }),
     ...(lineKey === undefined ? {} : { lineKey }),
     ...(watch === undefined ? {} : { watch: toWatch(watch, compare !== undefined) }),
+    ...(told === undefined ? {} : { prompt: told }),
+    ...(maxReportChars === undefined ? {} : { maxReportChars }),
+    ...(omitLines === undefined ? {} : { omitLines }),
   };
 }
 
@@ -225,6 +312,8 @@ export interface Gates {
   refused: { name: string; why: string }[];
   showAllPasses: boolean;
   maxSendBacks: number;
+  maxTotalReportChars: number;
+  prompts: Prompts;
 }
 
 /**
@@ -236,6 +325,7 @@ export function readGates(shared: string | undefined, local?: string): Gates {
   const sharedFile = fileOf(shared, GATES_FILE);
   const localFile = fileOf(local, LOCAL_GATES_FILE);
   const max = maxTimeoutOf(sharedFile, localFile);
+  const reportChars = maxReportCharsOf(sharedFile, localFile);
   const merged = new Map(sharedFile.entries.map((entry) => [entry.name, entry]));
   for (const entry of localFile.entries) merged.set(entry.name, { ...merged.get(entry.name), ...entry });
   const read: Gates = {
@@ -243,11 +333,14 @@ export function readGates(shared: string | undefined, local?: string): Gates {
     refused: [],
     showAllPasses: showAllPassesOf(sharedFile, localFile),
     maxSendBacks: maxSendBacksOf(sharedFile, localFile),
+    maxTotalReportChars: maxTotalReportCharsOf(sharedFile, localFile),
+    // The local file's own prompt wins, key by key.
+    prompts: { ...promptsOf(sharedFile), ...promptsOf(localFile) },
   };
   for (const entry of merged.values()) {
     if (entry.severity === "off") continue;
     try {
-      read.gates.push(toGate(entry, max));
+      read.gates.push(toGate(entry, max, reportChars));
     } catch (error) {
       read.refused.push({ name: entry.name, why: messageOf(error) });
     }

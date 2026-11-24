@@ -141,13 +141,23 @@
       }
     },
     {
-      "description": "Fails on the rule suppressions the turn added, never on the ones already there: eslint-disable, @ts-ignore, @ts-expect-error, @ts-nocheck, prettier-ignore, biome-ignore. The cheapest green is to silence the rule, and this is the gate that refuses it.",
+      "description": "Fails on the rule suppressions the turn added, never on the ones already there: eslint-disable, @ts-ignore, @ts-expect-error, @ts-nocheck, prettier-ignore, biome-ignore, stylelint-disable. The cheapest green is to silence the rule, and this is the gate that refuses it.",
       "requires": [],
       "gate": {
         "name": "no-new-suppressions",
         "severity": "error",
-        "files": "\\.(ts|tsx|js|jsx|mjs|cjs)$",
+        "files": "\\.(ts|tsx|js|jsx|mjs|cjs|css|scss)$",
         "run": ["{engine}/src/helpers/new-suppressions.ts", "{turn}", "{files}"]
+      }
+    },
+    {
+      "description": "Fails when the turn raised a count of an ESLint suppressions file, the one eslint --suppress-all writes: every violation of now goes into it, and the lint turns green with no comment in the code. A file the turn created or moved may take over the counts that left another, as long as the file holds no more of the rule than before: any other count that rises fails. Give its files the suppressions file of the repo, wherever --suppressions-location puts it.",
+      "requires": [],
+      "gate": {
+        "name": "no-new-bulk-suppressions",
+        "severity": "error",
+        "files": "(^|/)eslint-suppressions\\.json$",
+        "run": ["{engine}/src/helpers/bulk-suppressions.ts", "{turn}", "{files}"]
       }
     }
   ]

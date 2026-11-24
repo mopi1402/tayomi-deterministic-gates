@@ -28,6 +28,9 @@ The gates of a repo live in `.gates.json` at its root, committed. Each one names
 | `lineKey`        | For a compared gate, a regular expression for the part of a line that tells it apart, when the rest prints otherwise from run to run. See below.                                        |
 | `timeoutSeconds` | Less time for this gate than the check has, never more.                                                                                                                                 |
 | `watch`          | A long-running command the gate keeps between turns, judged at the stop instead of `run`. See below.                                                                                    |
+| `prompt`         | A text for the agent, given under the name of the gate when it is red. See [the prompts](#the-prompts-of-the-repo).                                                                     |
+| `maxReportChars` | The most characters of its report the agent is sent, for this gate. See [the settings](#the-settings-of-the-whole-check).                                                               |
+| `omitLines`      | A regular expression for the lines of its report the agent is never sent, such as the frames of a stack: `^\\s+at `. It changes no verdict, and a report it would empty is sent whole.  |
 
 ## A compared gate whose lines print otherwise
 
@@ -103,11 +106,43 @@ A gate with `compare` judges its watch the same way, on the lines added: at the 
 
 Next to `gates`, a gates file may set these, and a value in `.gates.local.json` wins:
 
-| Setting             | Default | Meaning                                                                                                                                                                                                                                                                                                                  |
-| ------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `maxTimeoutSeconds` | `45`    | The time the gates of a check have, all together. A gate still running then is stopped: it shows out of time, neither green nor red, and never sends the agent back. A slower check belongs in CI. An Angular project of a thousand specs takes about 50 s to rebuild and test a change many files import: give it `90`. |
-| `maxSendBacks`      | `5`     | The most times a turn sends the agent back, `0` never. Past it, the agent hands back and the summary says why.                                                                                                                                                                                                           |
-| `showAllPasses`     | `false` | `true` names every green gate, six to a line, where the summary names the six slowest and counts the rest, as in `... +5`.                                                                                                                                                                                               |
+| Setting               | Default | Meaning                                                                                                                                                                                                                                                                                                                                    |
+| --------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `maxTimeoutSeconds`   | `45`    | The time the gates of a check have, all together. A gate still running then is stopped: it shows out of time, neither green nor red, and never sends the agent back. A slower check belongs in CI. An Angular project of a thousand specs takes about 50 s to rebuild and test a change many files import: give it `90`.                   |
+| `maxSendBacks`        | `5`     | The most times a turn sends the agent back, `0` never. Past it, the agent hands back and the summary says why.                                                                                                                                                                                                                             |
+| `showAllPasses`       | `false` | `true` names every green gate, six to a line, where the summary names the six slowest and counts the rest, as in `... +5`.                                                                                                                                                                                                                 |
+| `maxReportChars`      | `4000`  | The most characters of the report of a gate the agent is sent. A longer report keeps its start and its end, cut between two lines when its lines are short enough, with the count of the lines cut. A gate sets its own with the same field, such as less for a list of clones. More than `maxTotalReportChars` needs that one raised too. |
+| `maxTotalReportChars` | `4000`  | The most characters the reports of a send-back hold, all gates together. Past it, a short report stays whole and the long ones share the rest alike.                                                                                                                                                                                       |
+
+## The prompts of the repo
+
+What the engine tells the agent has a default, and a repo words it again without waiting for a release. A prompt is a text, added after the default, or `{ "replace": "a text" }`, said in its place:
+
+```json
+{
+  "prompts": {
+    "sendBack": "Never edit a file under src/generated/."
+  },
+  "gates": [
+    {
+      "name": "no-new-clones",
+      "severity": "error",
+      "files": "\\.(ts|tsx)$",
+      "run": ["{engine}/src/helpers/new-clones.ts", "{turn}"],
+      "prompt": { "replace": "New clones: factor out when both sides are yours, else waive and name the file." }
+    }
+  ]
+}
+```
+
+| Prompt                 | When the agent reads it              | Its default                                                                  |
+| ---------------------- | ------------------------------------ | ---------------------------------------------------------------------------- |
+| `prompts.sendBack`     | Each time it is sent back            | Fix the code, never the check, and when a gate may stay red.                 |
+| `prompts.missingTools` | When a gate misses a tool            | Install the tools, or say so and go on.                                      |
+| `prompts.brokenGate`   | With the report of a gate that broke | Repair what stops the gate from running, then fix what it reports.           |
+| `prompt` of a gate     | When that gate is red                | The line a helper of the engine heads its report with, such as `New clones`. |
+
+The agent reads `prompts.sendBack` whole at the first send-back of a session in the repo, and one line stands for it at the next ones, until the session starts again or compacts. How to waive a gate is always said, whatever replaces `sendBack`: without it, the agent could only loop on a gate it cannot fix. The `run` of a gate whose prompt is replaced gets `GATES_PROMPT_REPLACED=1`, which the helpers of the engine read to leave their own line out, and a script of the repo may do the same. Its watch does not get it. A prompt in `.gates.local.json` wins over the one of `.gates.json`.
 
 ## Override the gates for yourself
 

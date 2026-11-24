@@ -203,6 +203,19 @@ describe("a report that broke as the turn started, after a turn that changed not
   });
 });
 
+describe("a compared gate whose command breaks", () => {
+  test("fails every turn it breaks in, whether it broke as the turn started or since: neither is excused", async () => {
+    writeFileSync(join(repo, "tool.mjs"), 'console.log("boom"); process.exit(2)');
+    gates({ name: "dead", severity: "error", files: "\\.ts$", run: ["tool.mjs"], compare: "turn-start" });
+    for (const file of ["a.ts", "b.ts"]) {
+      await startTurn(session, repo);
+      writeFileSync(join(repo, file), "1");
+      const [outcome] = (await checkTurn(session, repo)).outcomes;
+      assert.deepEqual([outcome?.ok, outcome?.broken, outcome?.timedOut], [false, true, undefined], file);
+    }
+  });
+});
+
 describe("a compared gate the agent leaves failing", () => {
   test("fails the next turn too: what a turn added stays new until it is fixed", async () => {
     writeFileSync(

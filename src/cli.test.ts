@@ -25,16 +25,22 @@ afterEach(() => {
   rmSync(repo, { recursive: true, force: true });
 });
 
+/** A repo with a gate that fails and one that passes, on its one file. */
+function redAndGreen(...more: object[]): void {
+  writeFileSync(join(repo, "fail.mjs"), 'console.log("a problem"); process.exit(1)');
+  writeFileSync(join(repo, "pass.mjs"), "");
+  writeFileSync(join(repo, "a.ts"), "1");
+  writeGates(
+    repo,
+    { name: "red", severity: "error", files: "\\.ts$", run: ["fail.mjs"] },
+    { name: "green", severity: "error", files: "\\.ts$", run: ["pass.mjs"] },
+    ...more,
+  );
+}
+
 describe("check", () => {
   test("reports every gate on the whole repo, then each failed report, and exits with 1", () => {
-    writeFileSync(join(repo, "fail.mjs"), 'console.log("a problem"); process.exit(1)');
-    writeFileSync(join(repo, "pass.mjs"), "");
-    writeFileSync(join(repo, "a.ts"), "1");
-    writeGates(
-      repo,
-      { name: "red", severity: "error", files: "\\.ts$", run: ["fail.mjs"] },
-      { name: "green", severity: "error", files: "\\.ts$", run: ["pass.mjs"] },
-    );
+    redAndGreen();
     const { status, stdout } = cli(["check"]);
     assert.equal(status, 1);
     assert.match(stdout, /1\/2 gates green/);
@@ -67,6 +73,34 @@ describe("check", () => {
     assert.equal(status, 1);
     assert.match(stdout, /## tests\na problem, once/);
     assert.equal(existsSync(join(repo, "watched")), false);
+  });
+
+  test("prints the check as JSON for a tool, each gate with its status, and exits the same", () => {
+    redAndGreen({ name: "styles", severity: "error", files: "\\.css$", run: ["pass.mjs"] });
+    const { status, stdout } = cli(["check", "--format", "json"]);
+    assert.equal(status, 1);
+    const { ok, gates, notes } = JSON.parse(stdout);
+    assert.equal(ok, false);
+    assert.deepEqual(notes, []);
+    assert.deepEqual(
+      gates.map(({ durationMs, ...gate }: { durationMs?: number }) => ({
+        ...gate,
+        timed: typeof durationMs === "number",
+      })),
+      [
+        { name: "red", status: "failed", report: "a problem", timed: true },
+        { name: "green", status: "passed", timed: true },
+        { name: "styles", status: "skipped", timed: false },
+      ],
+    );
+  });
+
+  test("prints the usage for a format it does not know, and exits with 2", () => {
+    writeGates(repo, { name: "green", severity: "error", files: "\\.ts$", run: ["pass.mjs"] });
+    const { status, stdout, stderr } = cli(["check", "--format", "xml"]);
+    assert.equal(status, 2);
+    assert.equal(stdout, "");
+    assert.equal(stderr.trim(), USAGE);
   });
 
   test("says so outside git, and exits with 2", () => {

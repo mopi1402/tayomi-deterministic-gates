@@ -94,7 +94,11 @@ flowchart TD
 
 A compared gate fails on the lines of output the turn added: the lines its start report does not hold as they are, so a problem that moves to another line or is reworded counts as new too, unless its `lineKey` says otherwise. The lines stay new in the next turns until they are fixed: a report the agent leaves failing is not the next turn's baseline.
 
-The command exits with 0 when it finds problems, as `knip --no-exit-code` or `gofmt -l` do. Any other exit code fails the gate, even when it printed the same thing as the turn started.
+The command exits with 0 when it finds problems, as `knip --no-exit-code` or `gofmt -l` do. Any other exit code is the command that broke, even when it printed the same thing as the turn started.
+
+## A gate that breaks
+
+A gate that breaks is not a gate that found a problem: its command is missing or broke, as a compared gate that exits with another code than 0 does, or its watch stopped. It still fails the turn, even when it broke before the turn started: nothing tells a gate the agent broke two turns ago from one a missing dependency broke, and a gate excused for being broken already would be the cheapest way out of it. The agent is told to repair what stops the gate from running rather than to fix the code, and waives it when it cannot.
 
 The prompt's hook has 60 s, so the start reports have 45 s, together: a command still running then gives none, and the stop says the gate had no report to compare with. The turn is recorded before they run, so a hook stopped anyway still ends the turn before, its send-backs with it.
 
@@ -109,3 +113,28 @@ The two gates files alone: an agent that edits `.gates.json` or `.gates.local.js
 ## The whole check
 
 `npx @tayomi/deterministic-gates check` runs every gate on every file of the repo that matches, committed or not, as if one turn had written it all: a compared gate counts every line of its report. The summary and the failed reports print. The command exits with 1 when a gate fails, and with 2 when it cannot run: outside git, without a gates file, or with one it cannot read.
+
+`check --format json` prints the same check for a tool to read, such as a CI or a script, with the same exit codes:
+
+```json
+{
+  "ok": false,
+  "durationMs": 7040,
+  "gates": [
+    { "name": "lint", "status": "failed", "durationMs": 900, "report": "src/a.ts:3 no-unused-vars" },
+    { "name": "typecheck", "status": "passed", "durationMs": 1100 },
+    { "name": "format", "status": "skipped" }
+  ],
+  "notes": []
+}
+```
+
+| `status`    | The gate                                         | It also holds          |
+| ----------- | ------------------------------------------------ | ---------------------- |
+| `passed`    | Ran and found nothing.                           | `durationMs`           |
+| `failed`    | Found a problem.                                 | `durationMs`, `report` |
+| `broken`    | Could not run: its `report` says what stops it.  | `durationMs`, `report` |
+| `timed-out` | Ran out of time, so it is neither green nor red. | `durationMs`           |
+| `skipped`   | Looks at no file of the repo.                    |                        |
+
+`ok` is false when a gate failed or broke, and a `report` is whole, where the agent gets an excerpt.

@@ -3,7 +3,7 @@ import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, test } from "node:test";
 import { commitAll, git, tempRepo } from "../testing.ts";
-import { changedSince, hasCommit, lastCommit, listFiles, snapshot, workingTree } from "./snapshot.ts";
+import { changedSince, fileAt, hasCommit, lastCommit, listFiles, snapshot, workingTree } from "./snapshot.ts";
 
 let repo = "";
 const sleep = (ms: number) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -98,5 +98,20 @@ describe("a turn", () => {
     snapshot(repo);
     assert.equal(git(repo, ["status", "--porcelain"]), status);
     assert.equal(git(repo, ["rev-parse", "HEAD"]), head);
+  });
+});
+
+describe("fileAt", () => {
+  test("reads a file as a commit holds it, however long, and nothing for a file the commit does not have", () => {
+    const repo = tempRepo();
+    try {
+      const long = "x".repeat(2 * 1024 * 1024);
+      writeFileSync(join(repo, "long.json"), long);
+      commitAll(repo, "one");
+      assert.equal(fileAt(repo, "HEAD", "long.json"), long);
+      assert.equal(fileAt(repo, "HEAD", "missing.json"), undefined);
+    } finally {
+      rmSync(repo, { recursive: true, force: true });
+    }
   });
 });

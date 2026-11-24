@@ -1,10 +1,19 @@
 import { type CheckedTurn, checkTurn, startSession, startTurn } from "../core/check.ts";
-import { configuredRoot, gatesOf } from "../core/config.ts";
+import { configuredRoot, gatesOf, readGatesFiles } from "../core/config.ts";
 import { isRecord, messageOf, parseJson } from "../core/json.ts";
 import { broken, failures, summary, toolsMissing, toolsToInstall } from "../core/report.ts";
 import { type Judged, judge, waivesOf } from "../core/send-back.ts";
 import { endSession } from "../core/watch.ts";
-import { forgetTold, forgetTurn, readTurn, tellOnce, turnRoot, writeTurn } from "../core/turn-state.ts";
+import {
+  forgetConduct,
+  forgetTold,
+  forgetTurn,
+  readTurn,
+  tellConductOnce,
+  tellOnce,
+  turnRoot,
+  writeTurn,
+} from "../core/turn-state.ts";
 
 export interface HookInput {
   session_id?: string;
@@ -72,10 +81,11 @@ function told({ count, max, waived, fallen, unknown, gates }: Judged): string[] 
  * breaks another gate is caught, and a gate the agent cannot satisfy never loops. The owner sees each stop, the
  * waived gates with their reasons, and why the turn ended.
  */
-export function stopOutput(turn: CheckedTurn, judged: Judged): HookOutput {
+export function stopOutput(turn: CheckedTurn, judged: Judged, brief = false): HookOutput {
   const systemMessage = summary(turn, ending(judged), judged.waived);
   if (!judged.sendBack) return { systemMessage };
-  return { decision: "block", reason: failures({ ...turn, outcomes: judged.open }, told(judged)), systemMessage };
+  const reason = failures({ ...turn, outcomes: judged.open }, told(judged), brief);
+  return { decision: "block", reason, systemMessage };
 }
 
 // When the gates cannot run, such as with a gates file that does not parse, only the owner is told: a crash would
@@ -106,9 +116,13 @@ async function promptHook(session: string, cwd: string): Promise<HookOutput | un
     if (root === undefined) return undefined;
     const missing = await startTurn(session, root);
     if (!tellOnce(session, root, missing)) return undefined;
+    const { prompts } = gatesOf(readGatesFiles(root));
     return {
       systemMessage: toolsMissing(missing),
-      hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: toolsToInstall(missing) },
+      hookSpecificOutput: {
+        hookEventName: "UserPromptSubmit",
+        additionalContext: toolsToInstall(missing, prompts.missingTools),
+      },
     };
   } catch (error) {
     return cannotRun(error);
@@ -135,7 +149,8 @@ async function stopHook(
     const names = [...gates.map(({ name }) => name), ...refused.map(({ name }) => name)];
     const judged = judge(checked, waivesOf(message), names, maxSendBacks, turn.sendBacks);
     writeTurn(session, root, { ...turn, sendBacks: judged.state });
-    return stopOutput(checked, judged);
+    const brief = judged.sendBack && !tellConductOnce(session, root);
+    return stopOutput(checked, judged, brief);
   } catch (error) {
     return cannotRun(error);
   }
@@ -157,6 +172,8 @@ export async function handleHook(event: HookEvent, text: string): Promise<HookOu
   // A session that starts, resumes or is cleared asks again for the missing tools; a compaction goes on as it was.
   if (event === "session-start") {
     if (source !== "compact") forgetTold(session);
+    // A compaction may have summed up how to act on a send-back: the next one says it whole again.
+    forgetConduct(session);
     sessionHook(session, cwd);
     return undefined;
   }

@@ -50,6 +50,8 @@ interface SessionState {
   current?: string;
   turns: Record<string, TurnState>;
   told?: Record<string, string[]>;
+  /** The repos a send-back of the session told the agent how to act in: the next ones there say it in one line. */
+  conductTold?: string[];
 }
 
 const EMPTY: SessionState = { turns: {} };
@@ -89,7 +91,8 @@ function isSessionState(value: unknown): value is SessionState {
     (value.current === undefined || typeof value.current === "string") &&
     isRecord(value.turns) &&
     Object.values(value.turns).every(isTurnState) &&
-    (value.told === undefined || (isRecord(value.told) && Object.values(value.told).every(isStringArray)))
+    (value.told === undefined || (isRecord(value.told) && Object.values(value.told).every(isStringArray))) &&
+    (value.conductTold === undefined || isStringArray(value.conductTold))
   );
 }
 
@@ -112,15 +115,19 @@ export function readTurn(session: string, root: string): TurnState | undefined {
  * progress is read again, by its retry.
  */
 export function writeTurn(session: string, root: string, turn: TurnState): void {
-  const { turns, told } = readSession(session);
+  const { turns, ...state } = readSession(session);
   const unchecked = Object.entries(turns).filter(([, kept]) => !kept.checked);
-  writeSession(session, { told, current: root, turns: { ...Object.fromEntries(unchecked), [root]: turn } });
+  writeSession(session, { ...state, current: root, turns: { ...Object.fromEntries(unchecked), [root]: turn } });
 }
 
 /** Ends the turn in progress without a check, as a prompt from a folder with no gates, or a failed start, does. */
 export function forgetTurn(session: string): void {
-  const { current, ...state } = readSession(session);
-  if (current !== undefined) writeSession(session, state);
+  forget(session, "current");
+}
+
+function forget(session: string, key: "current" | "told" | "conductTold"): void {
+  const { [key]: had, ...state } = readSession(session);
+  if (had !== undefined) writeSession(session, state);
 }
 
 /**
@@ -135,10 +142,26 @@ export function tellOnce(session: string, root: string, missing: string[]): bool
   return missing.length > 0;
 }
 
+/**
+ * Whether the agent is yet to be told how to act on a send-back of this repo, in this session: said once, it stays in
+ * its context, and saying it again at every send-back only costs it tokens. Each repo has its own words for it.
+ */
+export function tellConductOnce(session: string, root: string): boolean {
+  const state = readSession(session);
+  const told = state.conductTold ?? [];
+  if (told.includes(root)) return false;
+  writeSession(session, { ...state, conductTold: [...told, root] });
+  return true;
+}
+
+/** Forgets that the agent was told how to act: a session that starts again, or compacts, may have lost it. */
+export function forgetConduct(session: string): void {
+  forget(session, "conductTold");
+}
+
 /** Forgets what the agent was told of missing tools, so a session that starts again, or resumes, is told again. */
 export function forgetTold(session: string): void {
-  const { told, ...state } = readSession(session);
-  if (told !== undefined) writeSession(session, state);
+  forget(session, "told");
 }
 
 /**
