@@ -85,7 +85,7 @@
       }
     },
     {
-      "description": "Fails on the strict template errors the turn added, never on the ones already there, for a project that turned strictTemplates off: it compiles the templates with strictTemplates and strictNullChecks forced on top of the project's options, through the API of the Angular compiler, so a binding that may be null is reported even when the TypeScript has strict errors of its own. The build gate checks the templates with the project's own options. An error is not new when moved, or reported with the same message in another file the turn did not change, or on a changed line as long as its file has no more errors of its code than at the turn start. It checks tsconfig.app.json: give its -p the tsconfig of the application.",
+      "description": "Fails on the strict errors the turn added, in the TypeScript and in the templates, never on the ones already there, for a project that turned strict options off: it compiles the application through the API of the Angular compiler, with strictTemplates and each option of TypeScript its run lists forced on top of the project's own. Add or remove an option there, written as tsc takes it: one TypeScript does not know is refused. On an Angular project, it stands for the no-new-strict-errors of the TypeScript catalog, which reads no template. The compiler stays between turns and checks again when asked, reusing what it compiled: it is asked through its tsconfig, the one of -p. The build gate checks with the project's own options. An error is not new when moved, or reported with the same message in another file the turn did not change, or on a changed line as long as its file has no more errors of its code than at the turn start. It checks tsconfig.app.json: give its -p, and its watch.sync, the tsconfig of the application.",
       "requires": [
         {
           "tool": "@angular/compiler-cli",
@@ -97,12 +97,31 @@
         }
       ],
       "gate": {
-        "name": "no-new-strict-template-errors",
+        "name": "no-new-strict-errors",
         "severity": "error",
         "files": "(\\.(ts|html)|(^|/)tsconfig[^/]*\\.json)$",
-        "run": ["{engine}/src/helpers/template-errors.ts", "-p", "tsconfig.app.json", "--strictNullChecks"],
+        "run": [
+          "{engine}/src/helpers/angular-errors.ts",
+          "-p",
+          "tsconfig.app.json",
+          "--strictNullChecks",
+          "--strictPropertyInitialization"
+        ],
         "compare": "turn-start",
-        "lineKey": "^((?<file>.+?): error (?:TS|NG)\\d+) at [^\\t]*"
+        "lineKey": "^((?<file>.+?): error (?:TS|NG)\\d+) at [^\\t]*",
+        "watch": {
+          "run": [
+            "{engine}/src/helpers/angular-errors.ts",
+            "--watch",
+            "-p",
+            "tsconfig.app.json",
+            "--strictNullChecks",
+            "--strictPropertyInitialization"
+          ],
+          "cycleStart": "^Type check started$",
+          "cycleEnd": "^Type check done$",
+          "sync": "tsconfig.app.json"
+        }
       }
     }
   ]

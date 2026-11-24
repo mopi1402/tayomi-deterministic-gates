@@ -3,12 +3,12 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { after, describe, test } from "node:test";
-import { compilerOf, templateErrors } from "./template-errors.ts";
+import { compilerOf, angularErrors } from "./angular-errors.ts";
 
 const ROOT = "/repo";
 const CARD = '<h2>{{ title }}</h2>\n<app-badge [count]="title" />\n';
 
-describe("the template errors of the Angular compiler", () => {
+describe("the errors of the Angular compiler", () => {
   test("print an error of a template file on one line: its file, code and source line, then its message", () => {
     const diagnostic = {
       file: { fileName: "/repo/src/app/card.html", text: CARD },
@@ -16,7 +16,7 @@ describe("the template errors of the Angular compiler", () => {
       code: 2322,
       messageText: "Type 'string' is not assignable to type 'number'.",
     };
-    assert.deepEqual(templateErrors(ROOT, [diagnostic]), [
+    assert.deepEqual(angularErrors(ROOT, [diagnostic]), [
       "src/app/card.html: error TS2322 at `<app-badge [count]=\"title\" />`\tType 'string' is not assignable to type 'number'.",
     ]);
   });
@@ -30,7 +30,7 @@ describe("the template errors of the Angular compiler", () => {
       messageText: "Type 'string' is not assignable to type 'number'.",
     };
     assert.match(
-      templateErrors(ROOT, [diagnostic])[0] ?? "",
+      angularErrors(ROOT, [diagnostic])[0] ?? "",
       /^src\/app\/inline\.ts: error TS2322 at `<app-badge \[count\]="'x'" \/>`\t/,
     );
   });
@@ -44,7 +44,7 @@ describe("the template errors of the Angular compiler", () => {
       messageText: "'unknown-thing' is not a known element:",
     };
     assert.match(
-      templateErrors(ROOT, [diagnostic])[0] ?? "",
+      angularErrors(ROOT, [diagnostic])[0] ?? "",
       /^src\/app\/card\.html: error NG8001 at `<unknown-thing \/>`\t/,
     );
   });
@@ -57,7 +57,7 @@ describe("the template errors of the Angular compiler", () => {
       code: 2322,
       messageText: "Type 'string' is not assignable to type 'number'.",
     });
-    const [first = "", second = ""] = templateErrors(ROOT, [at(11), at(40)]);
+    const [first = "", second = ""] = angularErrors(ROOT, [at(11), at(40)]);
     assert.equal(second.split("\t")[0], `${first.split("\t")[0]} (2)`);
   });
 
@@ -68,7 +68,7 @@ describe("the template errors of the Angular compiler", () => {
       code: 2322,
       messageText: { messageText: "Type 'string' is not assignable to type 'number'.\n  More on why." },
     };
-    assert.match(templateErrors(ROOT, [diagnostic])[0] ?? "", /\tType 'string' is not assignable to type 'number'\.$/);
+    assert.match(angularErrors(ROOT, [diagnostic])[0] ?? "", /\tType 'string' is not assignable to type 'number'\.$/);
   });
 });
 
@@ -98,13 +98,19 @@ writeFileSync(
 );
 writeFileSync(join(project, "tsconfig.app.json"), JSON.stringify({ include: ["src/**/*.ts"] }));
 
-describe("the Angular compiler, as the template gate runs it", () => {
+describe("the Angular compiler, as the strict errors gate runs it", () => {
   after(() => rmSync(project, { recursive: true, force: true }));
 
   test("refuses a tsconfig that checks no file, since it only references others, and names them", async () => {
     assert.deepEqual(await compilerOf(project, ["--strictNullChecks"]), {
       refused:
         "tsconfig.json checks no file: it only references tsconfig.app.json. Add -p and the one to check to the gate's run.",
+    });
+  });
+
+  test("refuses an option TypeScript does not know, such as a misspelt one, rather than check nothing more", async () => {
+    assert.deepEqual(await compilerOf(project, ["-p", "tsconfig.app.json", "--strictNullCheck"]), {
+      refused: "Unknown compiler option '--strictNullCheck'. Did you mean 'strictNullChecks'?",
     });
   });
 

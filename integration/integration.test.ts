@@ -171,11 +171,21 @@ export class Hello {
         says: /template\/alt-text/,
       },
       {
-        gate: "no-new-strict-template-errors",
+        gate: "no-new-strict-errors",
         what: "an input whose new type breaks the template of a component the turn did not change",
         edits: { "src/app/badge.ts": BADGE("0") },
         says: /^src\/app\/card\.html: error TS2322 at `<app-badge \[label\]="title" \/>`/m,
         saysNot: /\[count\]/,
+      },
+      {
+        gate: "no-new-strict-errors",
+        what: "a value that may be undefined, in the TypeScript, in the same turn as a template the compiler reads again",
+        edits: {
+          "src/app/greet.ts": "export function greet(name?: string): string {\n  return name;\n}\n",
+          "src/app/card.html": '<h2>{{ title }}</h2>\n<app-badge [count]="title" />\n<app-badge [label]="title" />\n',
+        },
+        says: /^src\/app\/greet\.ts: error TS2322 at `return name;`/m,
+        saysNot: /card\.html/,
       },
     ],
   },

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0
+
+### Changed
+
+- `no-new-strict-template-errors` of the Angular catalog becomes `no-new-strict-errors`, and its helper `angular-errors.ts`: it reports the strict errors of the TypeScript too, from the same program. A copy of the gate needs the new entry
+
+### Added
+
+- The gate keeps the Angular compiler between turns, and reuses what it compiled
+- Its `run` lists the options of TypeScript to force, and refuses one TypeScript does not know
+
 ## 0.7.1
 
 ### Fixed
