@@ -10,8 +10,9 @@ import {
   type Prompts,
   readGatesFiles,
 } from "./config.ts";
+import { headOf, movedSince } from "./head.ts";
 import { cachedReports, cacheReports } from "./report-cache.ts";
-import { check, filesOf, givenFiles, missingTool, type Outcome, wholeProject } from "./run.ts";
+import { check, filesOf, givenFiles, missingTool, namesFiles, type Outcome, wholeProject } from "./run.ts";
 import { changedSince, emptyCommit, hasCommit, lastCommit, snapshot, workingTree } from "./snapshot.ts";
 import { readTurn, type TurnState, writeTurn } from "./turn-state.ts";
 import { judgeWatch, keepWatch, startWatch, TURN_START_MS, watchReport } from "./watch.ts";
@@ -88,9 +89,10 @@ export async function startTurn(session: string, root: string): Promise<string[]
     writeTurn(session, root, interrupted);
     return told;
   }
+  const head = headOf(root);
   const { commit: start, tree } = snapshot(root);
   // The turn starts before its reports are ready: a hook stopped for lack of time leaves it, never the turn before.
-  writeTurn(session, root, { start, baselines: {}, config, checked: false });
+  writeTurn(session, root, { start, ...head, baselines: {}, config, checked: false });
   const cached = cachedReports(root, tree);
   const baselines = await Promise.all(
     compared.map(async (gate): Promise<{ gate: Gate; ok: boolean; output?: string }> => {
@@ -110,6 +112,7 @@ export async function startTurn(session: string, root: string): Promise<string[]
   );
   writeTurn(session, root, {
     start,
+    ...head,
     baselines: Object.fromEntries(
       baselines.flatMap(({ gate, output }) => (output === undefined ? [] : [[gate.name, output]])),
     ),
@@ -123,7 +126,7 @@ export async function startTurn(session: string, root: string): Promise<string[]
  * Runs, in parallel, each gate that looks at a changed file. A deleted file counts as changed, since a gate that
  * reads the whole project may break on it, but is never named: a gate given {files} looks at the files left, and
  * is skipped when none is. At the end of a turn of a session, a gate that keeps a watch is judged on it instead of
- * running.
+ * running. Elsewhere, the reports of the turn start are of code HEAD has left since.
  */
 function runGates(
   root: string,
@@ -132,6 +135,7 @@ function runGates(
   turn: string,
   baselines: Baselines,
   session?: string,
+  elsewhere = false,
 ): Promise<Result[]> {
   return Promise.all(
     gates.map(async (gate) => {
@@ -139,8 +143,8 @@ function runGates(
       const files = givenFiles(gate) ? matching.filter((file) => existsSync(join(root, file))) : matching;
       if (!files.length) return { gate };
       if (session !== undefined && keepsWatch(gate))
-        return { gate, outcome: await judgeWatch(session, root, gate, matching, baselines(gate)) };
-      return { gate, outcome: await check(root, gate, files, turn, baselines(gate)) };
+        return { gate, outcome: await judgeWatch(session, root, gate, matching, baselines(gate), elsewhere) };
+      return { gate, outcome: await check(root, gate, files, turn, baselines(gate), elsewhere) };
     }),
   );
 }
@@ -179,12 +183,13 @@ export async function checkAll(root: string): Promise<CheckedTurn> {
 
 // A report holds for the tree a turn ends on only if the gate ran clean on the whole project. A gate that failed
 // keeps the report it started from, so what the turn added stays new until it is fixed, and a gate that did not run
-// keeps none: it may still read a changed file its pattern misses, as knip reads tsconfig.json.
-function endReports(results: Result[], baselines: Baselines) {
+// keeps none: it may still read a changed file its pattern misses, as knip reads tsconfig.json. Elsewhere, the report
+// a failed gate started from is of code HEAD has left, and is not kept either.
+function endReports(results: Result[], baselines: Baselines, elsewhere: boolean) {
   return results.flatMap(({ gate, outcome }) => {
     // A gate that could not run says nothing of the tree: the report it started from was a crash, or may be stale.
     if (!isCompared(gate) || !outcome || outcome.broken) return [];
-    const report = outcome.ok ? outcome.report : baselines(gate);
+    const report = outcome.ok ? outcome.report : elsewhere ? undefined : baselines(gate);
     return report === undefined ? [] : [[gate, report] as const];
   });
 }
@@ -193,7 +198,9 @@ function endReports(results: Result[], baselines: Baselines) {
  * Runs each gate that looks at a file the turn changed, with the gates as the turn started: an agent that weakens
  * them mid-turn changes the next turn, never its own. Without a recorded start, the turn runs from the last commit
  * with the gates of now; with a start git no longer has, from the last commit with the gates and the reports it
- * started with: checking too much beats leaving a hole.
+ * started with: checking too much beats leaving a hole. When HEAD moved during the turn to code it did not write, as
+ * a checkout or a pull does, the turn is only what the tree differs by from the commit HEAD reached, with what the
+ * turn committed before: the rest came with that commit.
  */
 export async function checkTurn(session: string, root: string): Promise<CheckedTurn> {
   const recorded = readTurn(session, root);
@@ -210,28 +217,44 @@ export async function checkTurn(session: string, root: string): Promise<CheckedT
     baselines: recorded?.baselines ?? {},
     config: recorded?.config ?? now,
     checked: false,
+    ...(kept ? { head: kept.head, moves: kept.moves } : {}),
     // What the earlier stops of the turn told the agent goes on, so its send-backs and waivers add up.
     ...(recorded?.sendBacks ? { sendBacks: recorded.sendBacks } : {}),
   };
-  const baselines: Baselines = (gate) => turn.baselines[gate.name];
+  const moved = kept && movedSince(root, kept);
+  // A report of code HEAD has left serves a gate whose lines name their file, to count the ones of the turn's files.
+  const baselines: Baselines = (gate) => (moved && !namesFiles(gate) ? undefined : turn.baselines[gate.name]);
   const started = performance.now();
   const end = workingTree(root);
-  const changed = changedSince(root, turn.start, end);
+  const since = changedSince(root, turn.start, end);
+  const own = moved && new Set([...changedSince(root, moved.to, end), ...moved.committed]);
+  const changed = own ? since.filter((file) => own.has(file)) : since;
   const config = gatesOf(turn.config);
   const { gates, refused } = config;
   const missing = missingTools(root, gates);
   for (const gate of gates) if (keepsWatch(gate)) keepWatch(root, gate);
-  const results = await runGates(root, runnable(gates, missing), changed, turn.start, baselines, session);
-  cacheReports(root, end, endReports(results, baselines));
+  const from = moved?.to ?? turn.start;
+  const results = await runGates(
+    root,
+    runnable(gates, missing),
+    changed,
+    from,
+    baselines,
+    session,
+    moved !== undefined,
+  );
+  cacheReports(root, end, endReports(results, baselines, moved !== undefined));
   writeTurn(session, root, { ...turn, checked: true });
   // A compared gate with no report from the turn start can only count its exit code, and a watch has none: a green it
   // did not earn is said.
   const uncompared = results
     .filter(({ gate, outcome }) => outcome && isCompared(gate) && baselines(gate) === undefined)
     .map(({ gate }) =>
-      keepsWatch(gate)
-        ? `${gate.name} not judged: no report from the turn start to compare its cycle with`
-        : `${gate.name} not compared: no report from the turn start, only its exit code counted`,
+      turn.baselines[gate.name] !== undefined
+        ? `${gate.name} not compared: its report of the turn start is of the code HEAD left, and its lines name no file`
+        : keepsWatch(gate)
+          ? `${gate.name} not judged: no report from the turn start to compare its cycle with`
+          : `${gate.name} not compared: no report from the turn start, only its exit code counted`,
     );
   // Only a gate the turn concerned is named: one that would not have run anyway costs nothing to miss.
   const notRun = missing
@@ -239,6 +262,7 @@ export async function checkTurn(session: string, root: string): Promise<CheckedT
     .map(({ gate, why }) => `${gate.name} not run: ${why}`);
   const notes = [
     ...(startNote ? [startNote] : []),
+    ...(moved ? [`HEAD moved during the turn (${moved.how}): only what the turn changed since is checked`] : []),
     ...configNote(changedGatesFiles(turn.config, now)),
     ...uncompared,
     ...refusedNotes(refused),

@@ -205,6 +205,8 @@ interface Executed {
   timedOut: boolean;
   /** The command was never started: it is missing, or the engine cannot resolve it. */
   cannotStart: boolean;
+  /** The code the command exited with, when it ran to its end. */
+  exitCode?: number;
 }
 
 async function execute(root: string, gate: Gate, args: string[]): Promise<Executed> {
@@ -240,6 +242,7 @@ async function execute(root: string, gate: Gate, args: string[]): Promise<Execut
           ms: performance.now() - started,
           timedOut: error?.killed === true && error.code !== "ERR_CHILD_PROCESS_STDIO_MAXBUFFER",
           cannotStart: error?.code === "ENOENT",
+          ...(typeof error?.code === "number" ? { exitCode: error.code } : {}),
         });
       },
     );
@@ -282,9 +285,20 @@ export async function wholeProject(
   return timedOut ? { ok: false } : { ok, output };
 }
 
+/** The file a line of a compared gate names, by the group of its key named file. */
+function fileOf(gate: Gate, line: string): string | undefined {
+  return gate.lineKey === undefined ? undefined : new RegExp(gate.lineKey).exec(line)?.groups?.file;
+}
+
+/** Whether the lines of a compared gate name their file, so that they can be told from the ones of other files. */
+export function namesFiles(gate: Gate): boolean {
+  return /\(\?<file>/.test(gate.lineKey ?? "");
+}
+
 /**
  * Runs a gate on the turn. A compared gate fails on the lines of output the turn added, and is broken on any exit
- * code but 0: the same crash at the start and at the end of a turn prints no new line. A gate out of time is neither.
+ * code but 0: the same crash at the start and at the end of a turn prints no new line. Another gate is broken on the
+ * exit codes it names as such. A gate out of time is neither.
  */
 export async function check(
   root: string,
@@ -292,27 +306,34 @@ export async function check(
   files: string[],
   turn: string,
   baseline: string | undefined,
+  elsewhere = false,
 ): Promise<Outcome> {
-  const { ok, output, ms, timedOut, cannotStart } = await execute(root, gate, argumentsOf(gate, files, turn));
+  const executed = await execute(root, gate, argumentsOf(gate, files, turn));
+  const { ok, output, ms, timedOut, cannotStart, exitCode = 0 } = executed;
   const ran = { name: gate.name, ms, report: ok ? output : undefined };
   if (timedOut) return { ...ran, ok, output, timedOut };
   // A compared gate exits with 0 when it finds problems: any other code is its command that broke.
-  if (!ok && (cannotStart || isCompared(gate))) return { ...ran, ok, output, broken: true };
+  const broke = cannotStart || isCompared(gate) || gate.brokenExitCodes?.includes(exitCode);
+  if (!ok && broke) return { ...ran, ok, output, broken: true };
   if (!isCompared(gate) || !ok) return { ...ran, ok, output };
-  return { ...ran, ...addedLines(gate, output, baseline, files) };
+  return { ...ran, ...addedLines(gate, output, baseline, files, elsewhere) };
 }
 
 /**
  * Judges the output of a compared gate that ran clean: it fails on the lines the turn added to the report of the turn
- * start. Without that report, nothing counts but the exit code.
+ * start. Without that report, nothing counts but the exit code. With a report of code HEAD has left since, elsewhere,
+ * only the lines that name a file the turn changed count: the others came with the code HEAD moved to.
  */
 export function addedLines(
   gate: Gate,
   output: string,
   baseline: string | undefined,
   changed: string[],
+  elsewhere = false,
 ): { ok: boolean; output: string } {
   if (baseline === undefined) return { ok: true, output: "" };
-  const added = newLines(baseline, output, gate.ignoreLines, gate.lineKey, changed);
+  const added = newLines(baseline, output, gate.ignoreLines, gate.lineKey, changed).filter(
+    (line) => !elsewhere || changed.includes(fileOf(gate, line) ?? ""),
+  );
   return { ok: added.length === 0, output: added.join("\n") };
 }

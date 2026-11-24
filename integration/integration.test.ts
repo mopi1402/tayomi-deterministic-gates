@@ -373,6 +373,7 @@ function project(technology: string, entries: Entry[], start: Edits = {}, settin
   const event = (name: string, fields: object) =>
     JSON.stringify({ session_id: session, cwd: root, hook_event_name: name, ...fields });
   return {
+    root,
     prompt: () => handleHook("turn-start", event("UserPromptSubmit", { prompt: "hi" })),
     edit: (edits: Edits, deletes: string[] = []) => {
       for (const [file, text] of Object.entries(edits)) writeFileSync(join(root, file), text);
@@ -476,6 +477,46 @@ describe("the settings of a repo", () => {
       assert.match(second, /^Gates fail again: /);
       assert.doesNotMatch(second, /Never edit src\/gen/);
       assert.match(second, /## no-new-suppressions\nAsk the owner before you silence a rule\.\nsrc\/add\.ts/);
+    } finally {
+      await agent.remove();
+    }
+  });
+});
+
+// A branch the agent checks out mid-turn brings files the turn did not write: the hook judges only the ones it did.
+describe("a turn that checks out another branch", () => {
+  test("is not judged on what the branch brought, only on what it wrote since", async () => {
+    const lint = readCatalogs(CATALOG_DIR)
+      .flatMap((catalog) => (catalog.id === "typescript" ? catalog.entries : []))
+      .find(({ gate }) => gate.name === "lint");
+    assert.ok(lint, "the catalog has no gate lint");
+    const agent = project("typescript", [lint]);
+    const git = (...args: string[]) =>
+      execFileSync("git", ["-c", "user.name=test", "-c", "user.email=test@test.invalid", ...args], { cwd: agent.root });
+    try {
+      git("add", "--all");
+      git("commit", "--quiet", "-m", "main");
+      git("branch", "-M", "main");
+      git("checkout", "--quiet", "-b", "feature");
+      agent.edit({ "src/theirs.ts": "const theirs = 1;\n" });
+      git("add", "--all");
+      git("commit", "--quiet", "-m", "feature");
+      git("checkout", "--quiet", "main");
+
+      await agent.prompt();
+      git("checkout", "--quiet", "feature");
+      const alone = await agent.stop();
+      assert.equal(alone?.decision, undefined, alone?.systemMessage);
+      assert.match(stripVTControlCharacters(alone?.systemMessage ?? ""), /no file changed\nHEAD moved during the turn/);
+
+      await agent.prompt();
+      git("checkout", "--quiet", "main");
+      git("checkout", "--quiet", "feature");
+      agent.edit({ "src/mine.ts": "const mine = 1;\n" });
+      const edited = await agent.stop();
+      assert.equal(edited?.decision, "block", edited?.systemMessage);
+      assert.match(edited?.reason ?? "", /src\/mine\.ts/);
+      assert.doesNotMatch(edited?.reason ?? "", /src\/theirs\.ts/);
     } finally {
       await agent.remove();
     }

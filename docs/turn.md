@@ -50,6 +50,8 @@ The check runs in the repo the turn started in, whatever folder the agent stops 
 
 A deleted file counts as changed, so a gate that reads the whole project runs on it. It is never named, though: a gate given `{files}` looks at the files left, and is skipped when none is left. `{files}` is an argument of its own, `{turn}` can stand anywhere in one, and `{engine}/` only ever starts the first word of `run`.
 
+When HEAD moves during the turn to code the turn did not write, by a checkout, a pull, a merge, a rebase or a reset, what that commit brought is not the turn's. The engine reads it in the reflog of HEAD: the files of the turn are then the ones the tree differs by from the commit HEAD reached, with the ones the turn committed before, and `{turn}` is that commit. A turn that only changes branch checks nothing, and the summary says HEAD moved. The reports the compared gates started from are of the code HEAD left: a gate whose `lineKey` has a group named `file` counts only the lines that name a file of the turn, and another one is not compared, which the summary says.
+
 A gate runs from the root of the repo, with colour turned off. Its report is cut to the first and last lines past 4000 characters, with the root path left out.
 
 ## The gates that keep a watch
@@ -98,7 +100,7 @@ The command exits with 0 when it finds problems, as `knip --no-exit-code` or `go
 
 ## A gate that breaks
 
-A gate that breaks is not a gate that found a problem: its command is missing or broke, as a compared gate that exits with another code than 0 does, or its watch stopped. It still fails the turn, even when it broke before the turn started: nothing tells a gate the agent broke two turns ago from one a missing dependency broke, and a gate excused for being broken already would be the cheapest way out of it. The agent is told to repair what stops the gate from running rather than to fix the code, and waives it when it cannot.
+A gate that breaks is not a gate that found a problem: its command is missing or broke, as a compared gate that exits with another code than 0 does, or another gate with one of its `brokenExitCodes`, or its watch stopped. It still fails the turn, even when it broke before the turn started: nothing tells a gate the agent broke two turns ago from one a missing dependency broke, and a gate excused for being broken already would be the cheapest way out of it. The agent is told to repair what stops the gate from running rather than to fix the code, and waives it when it cannot.
 
 The prompt's hook has 60 s, so the start reports have 45 s, together: a command still running then gives none, and the stop says the gate had no report to compare with. The turn is recorded before they run, so a hook stopped anyway still ends the turn before, its send-backs with it.
 

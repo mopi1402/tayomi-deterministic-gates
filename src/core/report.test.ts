@@ -167,6 +167,36 @@ describe("failures", () => {
     assert.ok(text.slice(text.indexOf("## clones")).length < 360);
   });
 
+  test("says once the lines a helper counts apart, with how many times, and leaves the other lines as they are", () => {
+    const at = "gate-probe.ts: error TS2339 at `left = this.min ? this.min : this.max;`";
+    const strict = {
+      ...outcome("strict", false),
+      output: [
+        "",
+        "",
+        `${at}\tProperty 'min' does not exist.`,
+        `${at} (2)\tProperty 'min' does not exist.`,
+        `${at} (3)\tProperty 'max' does not exist.`,
+        `${at} (4)\tProperty 'max' does not exist.`,
+        `other.ts: error TS1 at \`x\` (2)\tAlone.`,
+      ].join("\n"),
+    };
+    const sent = failures(ran([strict]));
+    assert.ok(
+      sent.endsWith(
+        [
+          "## strict",
+          "",
+          "",
+          `${at}\tProperty 'min' does not exist. (×2)`,
+          `${at}\tProperty 'max' does not exist. (×2)`,
+          "other.ts: error TS1 at `x`\tAlone.",
+        ].join("\n"),
+      ),
+      sent,
+    );
+  });
+
   test("leaves out of a report the lines the gate omits, unless none would be left", () => {
     const stack = {
       ...outcome("lint", false),

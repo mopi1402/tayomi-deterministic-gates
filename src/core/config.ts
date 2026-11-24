@@ -26,6 +26,7 @@ const FIELDS = new Set([
   "prompt",
   "maxReportChars",
   "omitLines",
+  "brokenExitCodes",
 ]);
 const WATCH_FIELDS = new Set(["run", "cycleStart", "cycleEnd", "failed", "sync", "frozen"]);
 
@@ -73,6 +74,8 @@ export interface Gate {
   omitLines?: string;
   /** What the agent is told with the report of the gate. Replaced, an engine helper leaves its own line out. */
   prompt?: Prompt;
+  /** The exit codes of its command that mean it broke, where any other than 0 means it found a problem. */
+  brokenExitCodes?: number[];
 }
 
 /**
@@ -176,6 +179,10 @@ function isReportChars(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value > 0;
 }
 
+function isExitCodes(value: unknown): value is number[] {
+  return Array.isArray(value) && value.every((code) => Number.isInteger(code) && code >= 1 && code <= 255);
+}
+
 // Nothing unless a file says: the report then keeps the characters the engine gives every gate.
 function maxReportCharsOf(shared: GatesFile, local: GatesFile): number | undefined {
   const max = local.maxReportChars ?? shared.maxReportChars;
@@ -265,6 +272,7 @@ function toGate(entry: Entry, maxTimeoutSeconds: number, reportChars: number | u
     watch,
     prompt,
     omitLines,
+    brokenExitCodes,
     timeoutSeconds = maxTimeoutSeconds,
     maxReportChars = reportChars,
   } = entry;
@@ -285,6 +293,8 @@ function toGate(entry: Entry, maxTimeoutSeconds: number, reportChars: number | u
   if (typeof timeoutSeconds !== "number" || timeoutSeconds <= 0) refuse("timeoutSeconds is a positive number");
   if (maxReportChars !== undefined && !isReportChars(maxReportChars)) refuse(REPORT_CHARS_SHAPE);
   if (omitLines !== undefined && !isPattern(omitLines)) refuse("omitLines is a regular expression");
+  if (brokenExitCodes !== undefined && !isExitCodes(brokenExitCodes))
+    refuse("brokenExitCodes is a list of exit codes, each a whole number from 1 to 255");
   const told = prompt === undefined ? undefined : (toPrompt(prompt) ?? refuse(`prompt is ${PROMPT_SHAPE}`));
   return {
     name,
@@ -300,6 +310,7 @@ function toGate(entry: Entry, maxTimeoutSeconds: number, reportChars: number | u
     ...(told === undefined ? {} : { prompt: told }),
     ...(maxReportChars === undefined ? {} : { maxReportChars }),
     ...(omitLines === undefined ? {} : { omitLines }),
+    ...(brokenExitCodes === undefined ? {} : { brokenExitCodes }),
   };
 }
 

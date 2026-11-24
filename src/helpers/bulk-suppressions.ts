@@ -58,22 +58,27 @@ export function newBulkSuppressions(
   );
 }
 
-function main(root: string, turn: string, files: string[]): void {
-  const found = files.flatMap((file) => {
+/** The counts the turn raised in the suppressions files given, each under the name of its file. */
+export function bulkSuppressions(root: string, turn: string, files: string[]): string[] {
+  return files.flatMap((file) => {
     const before = fileAt(root, turn, file);
-    // ESLint names a source from the folder it runs in, which holds its suppressions file unless the repo moved it:
-    // a source not found there is never taken for a moved one.
-    const moved = (source: string) => {
-      const path = join(dirname(file), source);
-      return existsSync(join(root, path)) && fileAt(root, turn, path) === undefined;
-    };
+    // ESLint names a source from the folder it runs in: the one of its suppressions file, or the root of the repo
+    // when the repo keeps that file in a folder of its own. A source found in neither is never taken for a moved one.
+    const moved = (source: string) =>
+      [join(dirname(file), source), source].some(
+        (path) => existsSync(join(root, path)) && fileAt(root, turn, path) === undefined,
+      );
     const rose = newBulkSuppressions(
       before === undefined ? undefined : parseJson(before),
-      parseJson(readFileSync(file, "utf8")),
+      parseJson(readFileSync(join(root, file), "utf8")),
       moved,
     );
     return rose.map((line) => `${file}: ${line}`);
   });
+}
+
+function main(root: string, turn: string, files: string[]): void {
+  const found = bulkSuppressions(root, turn, files);
   if (!found.length) return;
   console.log(headed("New bulk suppressions: fix the violations, never the file that hides them.", found));
   process.exitCode = 1;

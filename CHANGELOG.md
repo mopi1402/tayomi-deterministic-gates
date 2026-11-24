@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.10.0
+
+### Fixed
+
+- A turn that checks out a branch, pulls, merges, rebases or resets is no longer judged on the code that came with it
+- `no-new-bulk-suppressions` knows a moved file when the suppressions files are in a folder of their own
+
+### Added
+
+- `brokenExitCodes` on a gate names the exit codes that mean its command broke: `[2]` for the ESLint gates of the catalogs
+
+### Changed
+
+- The agent reads once, with a count, the errors `no-new-strict-errors` finds several times on one source line
+
 ## 0.9.0
 
 ### Fixed

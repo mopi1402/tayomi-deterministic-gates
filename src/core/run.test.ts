@@ -211,6 +211,16 @@ describe("check, on any language", () => {
     assert.match(outcome.output, /no-such-tool is not installed/);
   });
 
+  test("broke rather than found a problem when it exits with a code the gate names as such", async () => {
+    tool('console.log("Cannot find module"); process.exit(2)');
+    const lint = { ...LINT, run: ["tool.mjs"], brokenExitCodes: [2] };
+    assert.equal((await check(root, lint, ["a.ts"], "abc", undefined)).broken, true);
+    tool('console.log("a.ts: no-console"); process.exit(1)');
+    assert.equal((await check(root, lint, ["a.ts"], "abc", undefined)).broken, undefined);
+    tool('console.log("Cannot find module"); process.exit(2)');
+    assert.equal((await check(root, { ...LINT, run: ["tool.mjs"] }, ["a.ts"], "abc", undefined)).broken, undefined);
+  });
+
   test("says the exit code of a gate that fails without a word, instead of an empty report", async () => {
     tool("process.exit(3)");
     const outcome = await check(root, { ...LINT, run: ["tool.mjs"] }, ["a.ts"], "abc", undefined);

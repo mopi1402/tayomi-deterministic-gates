@@ -17,20 +17,21 @@ The gates of a repo live in `.gates.json` at its root, committed. Each one names
 
 ## The fields of a gate
 
-| Field            | Meaning                                                                                                                                                                                 |
-| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`           | Lowercase words joined by hyphens.                                                                                                                                                      |
-| `severity`       | `error` sends the agent back. `off` never runs. There is no warning, because nobody acts on one.                                                                                        |
-| `files`          | A regular expression on the repo-relative paths. The gate runs when the turn changed a match, a deleted file included.                                                                  |
-| `run`            | The command, then its arguments. See below.                                                                                                                                             |
-| `compare`        | `turn-start`: the command runs on the whole project as the turn starts, and only the lines of output the turn added fail the gate. For a tool that exits with 0 when it finds problems. |
-| `ignoreLines`    | A regular expression for lines of output that never count as new, such as a header with a total.                                                                                        |
-| `lineKey`        | For a compared gate, a regular expression for the part of a line that tells it apart, when the rest prints otherwise from run to run. See below.                                        |
-| `timeoutSeconds` | Less time for this gate than the check has, never more.                                                                                                                                 |
-| `watch`          | A long-running command the gate keeps between turns, judged at the stop instead of `run`. See below.                                                                                    |
-| `prompt`         | A text for the agent, given under the name of the gate when it is red. See [the prompts](#the-prompts-of-the-repo).                                                                     |
-| `maxReportChars` | The most characters of its report the agent is sent, for this gate. See [the settings](#the-settings-of-the-whole-check).                                                               |
-| `omitLines`      | A regular expression for the lines of its report the agent is never sent, such as the frames of a stack: `^\\s+at `. It changes no verdict, and a report it would empty is sent whole.  |
+| Field             | Meaning                                                                                                                                                                                                             |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`            | Lowercase words joined by hyphens.                                                                                                                                                                                  |
+| `severity`        | `error` sends the agent back. `off` never runs. There is no warning, because nobody acts on one.                                                                                                                    |
+| `files`           | A regular expression on the repo-relative paths. The gate runs when the turn changed a match, a deleted file included.                                                                                              |
+| `run`             | The command, then its arguments. See below.                                                                                                                                                                         |
+| `compare`         | `turn-start`: the command runs on the whole project as the turn starts, and only the lines of output the turn added fail the gate. For a tool that exits with 0 when it finds problems.                             |
+| `ignoreLines`     | A regular expression for lines of output that never count as new, such as a header with a total.                                                                                                                    |
+| `lineKey`         | For a compared gate, a regular expression for the part of a line that tells it apart, when the rest prints otherwise from run to run. See below.                                                                    |
+| `timeoutSeconds`  | Less time for this gate than the check has, never more.                                                                                                                                                             |
+| `watch`           | A long-running command the gate keeps between turns, judged at the stop instead of `run`. See below.                                                                                                                |
+| `prompt`          | A text for the agent, given under the name of the gate when it is red. See [the prompts](#the-prompts-of-the-repo).                                                                                                 |
+| `maxReportChars`  | The most characters of its report the agent is sent, for this gate. See [the settings](#the-settings-of-the-whole-check).                                                                                           |
+| `omitLines`       | A regular expression for the lines of its report the agent is never sent, such as the frames of a stack: `^\\s+at `. It changes no verdict, and a report it would empty is sent whole.                              |
+| `brokenExitCodes` | The exit codes of its command that mean it broke rather than found a problem, as `[2]` for ESLint: the agent is then told to repair the gate, not the code. A compared gate needs none: it broke on any code but 0. |
 
 ## A compared gate whose lines print otherwise
 

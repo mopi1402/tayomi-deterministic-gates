@@ -81,7 +81,8 @@
         "name": "template-lint",
         "severity": "error",
         "files": "\\.html$",
-        "run": ["eslint", "--max-warnings", "0", "--no-warn-ignored", "{files}"]
+        "run": ["eslint", "--max-warnings", "0", "--no-warn-ignored", "{files}"],
+        "brokenExitCodes": [2]
       }
     },
     {

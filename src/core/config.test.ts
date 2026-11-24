@@ -99,6 +99,15 @@ describe("parseGates", () => {
     }
   });
 
+  test("reads the exit codes that mean a gate broke", () => {
+    assert.deepEqual(parseGates(file({ ...lint, brokenExitCodes: [2] }))[0]?.brokenExitCodes, [2]);
+    for (const wrong of [2, ["2"], [1.5], [0]])
+      assert.throws(
+        () => parseGates(file({ ...lint, brokenExitCodes: wrong })),
+        /brokenExitCodes is a list of exit codes/,
+      );
+  });
+
   test("reads the lines of its report a gate never sends the agent", () => {
     assert.equal(parseGates(file({ ...lint, omitLines: "^\\s+at " }))[0]?.omitLines, "^\\s+at ");
     assert.throws(() => parseGates(file({ ...lint, omitLines: "(" })), /omitLines is a regular expression/);

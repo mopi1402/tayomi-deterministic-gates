@@ -14,7 +14,8 @@
         "name": "lint",
         "severity": "error",
         "files": "\\.(ts|tsx|js|mjs)$",
-        "run": ["eslint", "--max-warnings", "0", "--no-warn-ignored", "{files}"]
+        "run": ["eslint", "--max-warnings", "0", "--no-warn-ignored", "{files}"],
+        "brokenExitCodes": [2]
       }
     },
     {

@@ -118,3 +118,30 @@ export function fileAt(root: string, commit: string, file: string): string | und
 export function changedSince(root: string, start: string, end = workingTree(root)): string[] {
   return paths(git(root, ["diff", "-z", "--name-only", start, end])).sort();
 }
+
+/** A move of HEAD, as its reflog tells it: the commit it left, the one it reached, and how. */
+export interface HeadMove {
+  from: string | undefined;
+  to: string;
+  how: string;
+}
+
+/** The moves of HEAD its reflog holds, oldest first: none in a repo with no commit, or that keeps no reflog. */
+export function headMoves(root: string): HeadMove[] {
+  try {
+    const entries = git(root, ["reflog", "show", "--format=%H %gs", "HEAD"]).split("\n").filter(Boolean).reverse();
+    const reached = entries.map((entry) => entry.slice(0, entry.indexOf(" ")));
+    return entries.map((entry, at) => ({
+      from: reached[at - 1],
+      to: reached[at] ?? "",
+      how: entry.slice(entry.indexOf(" ") + 1),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+/** The files a commit changed. For a merge, the ones it leaves unlike each of its parents: its resolved conflicts. */
+export function commitFiles(root: string, commit: string): string[] {
+  return paths(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "-c", "--root", "-z", commit]));
+}

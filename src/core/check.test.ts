@@ -8,7 +8,7 @@ import { gatesOf, readGatesFiles } from "./config.ts";
 import { cachedReports } from "./report-cache.ts";
 import { snapshot } from "./snapshot.ts";
 import { readTurn, writeTurn } from "./turn-state.ts";
-import { commitAll, tempRepo, writeGates } from "../testing.ts";
+import { commitAll, git, tempRepo, writeGates } from "../testing.ts";
 
 let repo = "";
 let session = "";
@@ -316,5 +316,139 @@ describe("a gate with a problem of its own", () => {
       ["fine"],
     );
     assert.match(turn.note ?? "", /^broken not run, its entry is wrong: unknown field extra$/m);
+  });
+});
+
+describe("a turn that moves HEAD to code it did not write", () => {
+  const as = ["-c", "user.name=test", "-c", "user.email=test@test.invalid"];
+  const judged = async () => {
+    const turn = await checkTurn(session, repo);
+    return { ...turn, said: Object.fromEntries(turn.outcomes.map(({ name, output }) => [name, output])) };
+  };
+
+  // On main, a.ts. On feature, b.ts and c.ts more. The lint gate names the files it is given, and fails.
+  beforeEach(() => {
+    writeFileSync(join(repo, "lint.mjs"), 'console.log(process.argv.slice(2).join(" ")); process.exit(1)');
+    gates({ name: "lint", severity: "error", files: "\\.ts$", run: ["lint.mjs", "{files}"] });
+    writeFileSync(join(repo, "a.ts"), "a");
+    commitAll(repo, "main");
+    git(repo, ["branch", "-M", "main"]);
+    git(repo, ["checkout", "--quiet", "-b", "feature"]);
+    writeFileSync(join(repo, "b.ts"), "b");
+    writeFileSync(join(repo, "c.ts"), "c");
+    commitAll(repo, "feature");
+    git(repo, ["checkout", "--quiet", "main"]);
+  });
+
+  test("judges nothing after a checkout alone, and says HEAD moved", async () => {
+    await startTurn(session, repo);
+    git(repo, ["checkout", "--quiet", "feature"]);
+    const turn = await judged();
+    assert.deepEqual([turn.changed, turn.outcomes], [[], []]);
+    assert.match(turn.note ?? "", /HEAD moved during the turn \(checkout: moving from main to feature\)/);
+  });
+
+  test("judges only the file the turn wrote after a checkout", async () => {
+    await startTurn(session, repo);
+    git(repo, ["checkout", "--quiet", "feature"]);
+    writeFileSync(join(repo, "d.ts"), "d");
+    writeFileSync(join(repo, "b.ts"), "b, edited");
+    assert.equal((await judged()).said.lint, "b.ts d.ts");
+  });
+
+  test("judges a file the turn wrote before a checkout that kept it", async () => {
+    await startTurn(session, repo);
+    writeFileSync(join(repo, "d.ts"), "d");
+    git(repo, ["checkout", "--quiet", "feature"]);
+    assert.equal((await judged()).said.lint, "d.ts");
+  });
+
+  test("judges what the agent commits on its branch as before, without a note", async () => {
+    await startTurn(session, repo);
+    writeFileSync(join(repo, "d.ts"), "d");
+    commitAll(repo, "agent");
+    const turn = await judged();
+    assert.equal(turn.said.lint, "d.ts");
+    assert.equal(turn.note, undefined);
+  });
+
+  test("judges nothing a merge brought, as a pull does", async () => {
+    await startTurn(session, repo);
+    git(repo, [...as, "merge", "--quiet", "feature"]);
+    assert.deepEqual((await judged()).outcomes, []);
+  });
+
+  test("judges nothing a reset to another commit brought", async () => {
+    await startTurn(session, repo);
+    git(repo, ["reset", "--quiet", "--hard", "feature"]);
+    assert.deepEqual((await judged()).outcomes, []);
+  });
+
+  test("still judges what the turn committed before a rebase, and nothing the rebase brought", async () => {
+    await startTurn(session, repo);
+    writeFileSync(join(repo, "d.ts"), "d");
+    commitAll(repo, "agent");
+    git(repo, [...as, "rebase", "--quiet", "feature"]);
+    assert.equal((await judged()).said.lint, "d.ts");
+  });
+
+  test("judges the file of a conflict the turn resolved in a merge, and no other file the merge brought", async () => {
+    writeFileSync(join(repo, "a.ts"), "a, on main");
+    commitAll(repo, "main again");
+    git(repo, ["checkout", "--quiet", "feature"]);
+    writeFileSync(join(repo, "a.ts"), "a, on feature");
+    commitAll(repo, "feature again");
+    git(repo, ["checkout", "--quiet", "main"]);
+    await startTurn(session, repo);
+    assert.throws(() => git(repo, [...as, "merge", "--quiet", "feature"]));
+    writeFileSync(join(repo, "a.ts"), "a, resolved");
+    commitAll(repo, "merge");
+    assert.equal((await judged()).said.lint, "a.ts");
+  });
+
+  test("gives a gate the commit HEAD moved to as the turn start", async () => {
+    writeFileSync(join(repo, "start.mjs"), "console.log(process.argv[2]); process.exit(1)");
+    gates({ name: "start", severity: "error", files: "\\.ts$", run: ["start.mjs", "{turn}"] });
+    await startTurn(session, repo);
+    git(repo, ["checkout", "--quiet", "feature"]);
+    writeFileSync(join(repo, "d.ts"), "d");
+    assert.equal((await judged()).said.start, git(repo, ["rev-parse", "feature"]));
+  });
+
+  describe("with a compared gate", () => {
+    const tool =
+      'import { readdirSync } from "node:fs"; for (const file of readdirSync(".")) if (file.endsWith(".ts")) console.log(`${file}: unused`)';
+    const dead = { name: "dead", severity: "error", files: "\\.ts$", run: ["dead.mjs"], compare: "turn-start" };
+
+    test("counts only the lines that name a file of the turn", async () => {
+      writeFileSync(join(repo, "dead.mjs"), tool);
+      gates({ ...dead, lineKey: "^(?<file>[^:]+)" });
+      await startTurn(session, repo);
+      git(repo, ["checkout", "--quiet", "feature"]);
+      writeFileSync(join(repo, "d.ts"), "d");
+      assert.equal((await judged()).said.dead, "d.ts: unused");
+    });
+
+    test("does not compare one whose lines name no file, and says so", async () => {
+      writeFileSync(join(repo, "dead.mjs"), tool);
+      gates(dead);
+      await startTurn(session, repo);
+      git(repo, ["checkout", "--quiet", "feature"]);
+      writeFileSync(join(repo, "d.ts"), "d");
+      const turn = await judged();
+      assert.equal(turn.outcomes[0]?.ok, true);
+      assert.match(turn.note ?? "", /dead not compared: its report of the turn start is of the code HEAD left/);
+    });
+
+    test("leaves the next turn a report of the code HEAD moved to", async () => {
+      writeFileSync(join(repo, "dead.mjs"), tool);
+      gates(dead);
+      await startTurn(session, repo);
+      git(repo, ["checkout", "--quiet", "feature"]);
+      await checkTurn(session, repo);
+      await startTurn(session, repo);
+      writeFileSync(join(repo, "a.ts"), "a, edited");
+      assert.equal((await judged()).outcomes[0]?.ok, true);
+    });
   });
 });

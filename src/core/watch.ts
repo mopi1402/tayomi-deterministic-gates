@@ -398,6 +398,7 @@ export async function judgeWatch(
   gate: WatchedGate,
   files: string[],
   baseline: string | undefined,
+  elsewhere = false,
 ): Promise<Outcome> {
   const folder = folderOf(root, gate);
   const owed = owedFiles(folder);
@@ -413,7 +414,7 @@ export async function judgeWatch(
   }
   // Paid, less what a stop out of time meanwhile added: only the lists this stop asked for.
   for (const list of owed.lists) rmSync(list, { force: true });
-  const judged = judgeCycle(gate, settled.cycle, baseline, asked);
+  const judged = judgeCycle(gate, settled.cycle, baseline, asked, elsewhere);
   return { name, ms, ...judged, report: judged.ok ? settled.cycle : undefined };
 }
 
@@ -423,10 +424,11 @@ function judgeCycle(
   cycle: string,
   baseline: string | undefined,
   files: string[],
+  elsewhere: boolean,
 ): { ok: boolean; output: string } {
   const fails = new RegExp(gate.watch.failed ?? "(?!)");
   return isCompared(gate)
-    ? addedLines(gate, cycle, baseline, files)
+    ? addedLines(gate, cycle, baseline, files, elsewhere)
     : { ok: !cycle.split("\n").some((line) => fails.test(line)), output: cycle };
 }
 

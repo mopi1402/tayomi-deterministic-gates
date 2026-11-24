@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GatesFiles } from "./config.ts";
+import type { Head } from "./head.ts";
 import { isRecord, isStringArray, isStringRecord, readJsonFile } from "./json.ts";
 
 /** A red gate the agent chose to leave, with why, bound to the fingerprint of the report it saw. */
@@ -21,11 +22,11 @@ export interface SendBacks {
 }
 
 /**
- * What a turn started from: the commit, the reports of its compared gates, and the gates files themselves, since a
- * turn is checked with the gates it started with. A turn the owner interrupts never reaches its check: it stays
- * unchecked until the next turn of its repo. Once checked, what its stops told the agent.
+ * What a turn started from: the commit, where HEAD was, the reports of its compared gates, and the gates files
+ * themselves, since a turn is checked with the gates it started with. A turn the owner interrupts never reaches its
+ * check: it stays unchecked until the next turn of its repo. Once checked, what its stops told the agent.
  */
-export interface TurnState {
+export interface TurnState extends Head {
   start: string;
   baselines: Record<string, string>;
   config: GatesFiles;
@@ -78,6 +79,8 @@ function isTurnState(value: unknown): value is TurnState {
   return (
     isRecord(value) &&
     typeof value.start === "string" &&
+    (value.head === undefined || typeof value.head === "string") &&
+    (value.moves === undefined || typeof value.moves === "number") &&
     isStringRecord(value.baselines) &&
     isGatesFiles(value.config) &&
     typeof value.checked === "boolean" &&
