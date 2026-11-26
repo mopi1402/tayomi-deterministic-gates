@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -340,12 +341,41 @@ describe("a turn that moves HEAD to code it did not write", () => {
     git(repo, ["checkout", "--quiet", "main"]);
   });
 
+  // main and feature each change a.ts their own way, then the turn starts on main.
+  const startInConflict = async () => {
+    writeFileSync(join(repo, "a.ts"), "a, on main");
+    commitAll(repo, "main again");
+    git(repo, ["checkout", "--quiet", "feature"]);
+    writeFileSync(join(repo, "a.ts"), "a, on feature");
+    commitAll(repo, "feature again");
+    git(repo, ["checkout", "--quiet", "main"]);
+    await startTurn(session, repo);
+  };
+
+  // A turn commits d.ts on a branch of its own, and ends back on main.
+  const leaveOnSide = async () => {
+    await startTurn(session, repo);
+    git(repo, ["checkout", "--quiet", "-b", "side"]);
+    writeFileSync(join(repo, "d.ts"), "d");
+    commitAll(repo, "agent");
+    git(repo, ["checkout", "--quiet", "main"]);
+    await checkTurn(session, repo);
+  };
+
+  // The turn commits d.ts on main, then rebases main on feature.
+  const commitThenRebase = async () => {
+    await startTurn(session, repo);
+    writeFileSync(join(repo, "d.ts"), "d");
+    commitAll(repo, "agent");
+    git(repo, [...as, "rebase", "--quiet", "feature"]);
+  };
+
   test("judges nothing after a checkout alone, and says HEAD moved", async () => {
     await startTurn(session, repo);
     git(repo, ["checkout", "--quiet", "feature"]);
     const turn = await judged();
     assert.deepEqual([turn.changed, turn.outcomes], [[], []]);
-    assert.match(turn.note ?? "", /HEAD moved during the turn \(checkout: moving from main to feature\)/);
+    assert.match(turn.note ?? "", /HEAD moved during the turn to code it did not write/);
   });
 
   test("judges only the file the turn wrote after a checkout", async () => {
@@ -385,25 +415,255 @@ describe("a turn that moves HEAD to code it did not write", () => {
   });
 
   test("still judges what the turn committed before a rebase, and nothing the rebase brought", async () => {
-    await startTurn(session, repo);
-    writeFileSync(join(repo, "d.ts"), "d");
-    commitAll(repo, "agent");
-    git(repo, [...as, "rebase", "--quiet", "feature"]);
+    await commitThenRebase();
     assert.equal((await judged()).said.lint, "d.ts");
   });
 
   test("judges the file of a conflict the turn resolved in a merge, and no other file the merge brought", async () => {
-    writeFileSync(join(repo, "a.ts"), "a, on main");
-    commitAll(repo, "main again");
-    git(repo, ["checkout", "--quiet", "feature"]);
-    writeFileSync(join(repo, "a.ts"), "a, on feature");
-    commitAll(repo, "feature again");
-    git(repo, ["checkout", "--quiet", "main"]);
-    await startTurn(session, repo);
+    await startInConflict();
     assert.throws(() => git(repo, [...as, "merge", "--quiet", "feature"]));
     writeFileSync(join(repo, "a.ts"), "a, resolved");
     commitAll(repo, "merge");
     assert.equal((await judged()).said.lint, "a.ts");
+  });
+
+  test("judges the file of a conflict the turn resolved in a rebase", async () => {
+    await startInConflict();
+    assert.throws(() => git(repo, [...as, "rebase", "--quiet", "feature"]));
+    writeFileSync(join(repo, "a.ts"), "a, resolved");
+    git(repo, ["add", "a.ts"]);
+    git(repo, [...as, "-c", "core.editor=true", "rebase", "--continue"]);
+    assert.equal((await judged()).said.lint, "a.ts");
+  });
+
+  describe("and back to code the turn knows", () => {
+    // The gate says whether the commit it is given as the turn start has d.ts.
+    beforeEach(() => {
+      writeFileSync(
+        join(repo, "had.mjs"),
+        'import { execFileSync } from "node:child_process"; try { execFileSync("git", ["cat-file", "-e", `${process.argv[2]}:d.ts`], { stdio: "ignore" }); console.log("had d.ts"); } catch { console.log("had no d.ts"); } process.exit(1)',
+      );
+      gates({ name: "had", severity: "error", files: "\\.ts$", run: ["had.mjs", "{turn}"] });
+    });
+
+    test("is a turn as any other when it leaves a branch and comes back, whatever it committed", async () => {
+      await startTurn(session, repo);
+      writeFileSync(join(repo, "d.ts"), "d");
+      commitAll(repo, "agent");
+      git(repo, ["checkout", "--quiet", "feature"]);
+      git(repo, ["checkout", "--quiet", "main"]);
+      const turn = await judged();
+      assert.equal(turn.said.had, "had no d.ts");
+      assert.equal(turn.note, undefined);
+    });
+
+    test("judges what it commits again after a reset to an older commit", async () => {
+      await startTurn(session, repo);
+      git(repo, ["checkout", "--quiet", "feature"]);
+      await checkTurn(session, repo);
+      await startTurn(session, repo);
+      git(repo, ["reset", "--quiet", "--soft", "HEAD~1"]);
+      writeFileSync(join(repo, "d.ts"), "d");
+      commitAll(repo, "again");
+      const turn = await judged();
+      assert.deepEqual([turn.said.had, turn.changed], ["had no d.ts", ["d.ts"]]);
+    });
+
+    test("gives a gate a turn start without what the turn committed before a rebase", async () => {
+      await commitThenRebase();
+      assert.equal((await judged()).said.had, "had no d.ts");
+    });
+  });
+
+  test("judges nothing when it goes back to an older commit of its branch", async () => {
+    git(repo, ["checkout", "--quiet", "feature"]);
+    await startTurn(session, repo);
+    git(repo, ["checkout", "--quiet", "main"]);
+    assert.deepEqual((await judged()).outcomes, []);
+  });
+
+  test("judges the file of a conflict the turn resolved in a rebase that applies patches", async () => {
+    await startInConflict();
+    assert.throws(() => git(repo, [...as, "rebase", "--quiet", "--apply", "feature"]));
+    writeFileSync(join(repo, "a.ts"), "a, resolved");
+    git(repo, ["add", "a.ts"]);
+    git(repo, [...as, "rebase", "--continue"]);
+    assert.equal((await judged()).said.lint, "a.ts");
+  });
+
+  test("judges what it committed in another worktree and merged, with no note", async () => {
+    await startTurn(session, repo);
+    const side = `${repo}-side`;
+    try {
+      git(repo, ["worktree", "add", "--quiet", "-b", "side", side]);
+      writeFileSync(join(side, "d.ts"), "d");
+      commitAll(side, "in a worktree");
+      git(repo, [...as, "merge", "--quiet", "side"]);
+      const turn = await judged();
+      assert.deepEqual([turn.said.lint, turn.note], ["d.ts", undefined]);
+    } finally {
+      rmSync(side, { recursive: true, force: true });
+    }
+  });
+
+  test("judges at the turn that brings it back a commit an earlier turn of the session left on another branch", async () => {
+    await startTurn(session, repo);
+    writeFileSync(join(repo, "d.ts"), "d");
+    commitAll(repo, "agent");
+    git(repo, ["checkout", "--quiet", "feature"]);
+    assert.deepEqual((await judged()).outcomes, []);
+    await startTurn(session, repo);
+    git(repo, ["checkout", "--quiet", "main"]);
+    assert.equal((await judged()).said.lint, "d.ts");
+  });
+
+  describe("with a remote", () => {
+    let remote = "";
+    // Before the turn, as a commit someone else pushed.
+    const yesterday = { GIT_COMMITTER_DATE: "2020-01-01T00:00:00Z", GIT_AUTHOR_DATE: "2020-01-01T00:00:00Z" };
+
+    beforeEach(() => {
+      remote = `${repo}-remote`;
+      execFileSync("git", ["init", "--quiet", "--bare", remote]);
+      git(repo, ["remote", "add", "origin", remote]);
+      git(repo, ["push", "--quiet", "--set-upstream", "origin", "main"]);
+    });
+
+    afterEach(() => {
+      rmSync(remote, { recursive: true, force: true });
+    });
+
+    test("judges what it commits and pushes, with no note", async () => {
+      await startTurn(session, repo);
+      writeFileSync(join(repo, "d.ts"), "d");
+      commitAll(repo, "agent");
+      git(repo, ["push", "--quiet", "origin", "main"]);
+      const turn = await judged();
+      assert.deepEqual([turn.said.lint, turn.note], ["d.ts", undefined]);
+    });
+
+    test("judges at the turn that brings it back a commit an earlier turn pushed on another branch", async () => {
+      await startTurn(session, repo);
+      git(repo, ["checkout", "--quiet", "-b", "mine"]);
+      writeFileSync(join(repo, "d.ts"), "d");
+      commitAll(repo, "agent");
+      git(repo, ["push", "--quiet", "--set-upstream", "origin", "mine"]);
+      git(repo, ["checkout", "--quiet", "main"]);
+      assert.deepEqual((await judged()).outcomes, []);
+      await startTurn(session, repo);
+      git(repo, ["checkout", "--quiet", "mine"]);
+      assert.equal((await judged()).said.lint, "d.ts");
+    });
+
+    test("judges nothing of an older commit fetched with no branch of the remote, as the pull request of a fork", async () => {
+      const fork = `${repo}-fork`;
+      try {
+        execFileSync("git", ["clone", "--quiet", "--branch", "main", remote, fork]);
+        writeFileSync(join(fork, "theirs.ts"), "theirs");
+        git(fork, ["add", "--all"]);
+        execFileSync("git", [...as, "commit", "--quiet", "-m", "theirs"], {
+          cwd: fork,
+          env: { ...process.env, ...yesterday },
+        });
+        await startTurn(session, repo);
+        git(repo, ["fetch", "--quiet", fork, "HEAD"]);
+        git(repo, ["checkout", "--quiet", "-b", "pr", "FETCH_HEAD"]);
+        assert.deepEqual((await judged()).outcomes, []);
+      } finally {
+        rmSync(fork, { recursive: true, force: true });
+      }
+    });
+
+    test("judges nothing a pull brought from the remote", async () => {
+      const other = `${repo}-other`;
+      try {
+        execFileSync("git", ["clone", "--quiet", "--branch", "main", remote, other]);
+        writeFileSync(join(other, "theirs.ts"), "theirs");
+        git(other, ["add", "--all"]);
+        execFileSync("git", [...as, "commit", "--quiet", "-m", "theirs"], {
+          cwd: other,
+          env: { ...process.env, ...yesterday },
+        });
+        git(other, ["push", "--quiet", "origin", "HEAD:main"]);
+        await startTurn(session, repo);
+        git(repo, [...as, "pull", "--quiet", "origin", "main"]);
+        writeFileSync(join(repo, "d.ts"), "d");
+        assert.equal((await judged()).said.lint, "d.ts");
+      } finally {
+        rmSync(other, { recursive: true, force: true });
+      }
+    });
+  });
+
+  test("still judges a commit it left on another branch after a turn of the session in another repo", async () => {
+    await leaveOnSide();
+    const other = tempRepo();
+    try {
+      writeGates(other);
+      await startTurn(session, other);
+      await checkTurn(session, other);
+      await startTurn(session, repo);
+      git(repo, [...as, "merge", "--quiet", "side"]);
+      assert.equal((await judged()).said.lint, "d.ts");
+    } finally {
+      rmSync(other, { recursive: true, force: true });
+    }
+  });
+
+  test("tells a checkout again once git lost a branch the session knew", async () => {
+    git(repo, ["checkout", "--quiet", "-b", "gone"]);
+    writeFileSync(join(repo, "gone.ts"), "gone");
+    commitAll(repo, "gone");
+    git(repo, ["checkout", "--quiet", "main"]);
+    await startTurn(session, repo);
+    await checkTurn(session, repo);
+    git(repo, ["branch", "--quiet", "-D", "gone"]);
+    git(repo, ["reflog", "expire", "--expire=now", "--all"]);
+    git(repo, ["gc", "--quiet", "--prune=now"]);
+    await startTurn(session, repo);
+    await checkTurn(session, repo);
+    await startTurn(session, repo);
+    git(repo, ["checkout", "--quiet", "feature"]);
+    assert.deepEqual((await judged()).outcomes, []);
+  });
+
+  test("judges nothing when it goes back to main from a branch the session committed on in an earlier turn", async () => {
+    await startTurn(session, repo);
+    git(repo, ["checkout", "--quiet", "-b", "mine"]);
+    writeFileSync(join(repo, "d.ts"), "d");
+    commitAll(repo, "agent");
+    assert.equal((await judged()).said.lint, "d.ts");
+    await startTurn(session, repo);
+    git(repo, ["checkout", "--quiet", "main"]);
+    const back = await judged();
+    assert.deepEqual(back.outcomes, []);
+    assert.match(back.note ?? "", /HEAD moved during the turn/);
+    await startTurn(session, repo);
+    git(repo, ["checkout", "--quiet", "mine"]);
+    writeFileSync(join(repo, "e.ts"), "e");
+    assert.equal((await judged()).said.lint, "e.ts");
+  });
+
+  test("still judges what it committed when the agent stops again after a send-back", async () => {
+    await startTurn(session, repo);
+    writeFileSync(join(repo, "d.ts"), "d");
+    commitAll(repo, "agent");
+    assert.equal((await judged()).said.lint, "d.ts");
+    assert.equal((await judged()).said.lint, "d.ts");
+  });
+
+  test("judges what it committed in the main worktree when a later turn merges it from another worktree", async () => {
+    await leaveOnSide();
+    const linked = `${repo}-linked`;
+    try {
+      git(repo, ["worktree", "add", "--quiet", "-b", "linked", linked]);
+      await startTurn(session, linked);
+      git(linked, [...as, "merge", "--quiet", "side"]);
+      const turn = await checkTurn(session, linked);
+      assert.equal(turn.outcomes.find(({ name }) => name === "lint")?.output, "d.ts");
+    } finally {
+      rmSync(linked, { recursive: true, force: true });
+    }
   });
 
   test("gives a gate the commit HEAD moved to as the turn start", async () => {
@@ -438,6 +698,29 @@ describe("a turn that moves HEAD to code it did not write", () => {
       const turn = await judged();
       assert.equal(turn.outcomes[0]?.ok, true);
       assert.match(turn.note ?? "", /dead not compared: its report of the turn start is of the code HEAD left/);
+    });
+
+    test("still compares one whose lines name no file when the turn amends the commit it started on", async () => {
+      writeFileSync(join(repo, "dead.mjs"), tool);
+      gates(dead);
+      await startTurn(session, repo);
+      writeFileSync(join(repo, "d.ts"), "d");
+      git(repo, ["add", "--all"]);
+      git(repo, [...as, "commit", "--quiet", "--amend", "--no-edit"]);
+      const turn = await judged();
+      assert.deepEqual([turn.said.dead, turn.note], ["d.ts: unused", undefined]);
+    });
+
+    test("does not hold the turn to a line that came with the only file a pull brought, which the turn then edited", async () => {
+      writeFileSync(join(repo, "dead.mjs"), tool);
+      gates(dead);
+      await startTurn(session, repo);
+      git(repo, [...as, "merge", "--quiet", "feature"]);
+      writeFileSync(join(repo, "b.ts"), "b, edited");
+      writeFileSync(join(repo, "c.ts"), "c, edited");
+      const turn = await judged();
+      assert.equal(turn.outcomes[0]?.ok, true);
+      assert.match(turn.note ?? "", /dead not compared/);
     });
 
     test("leaves the next turn a report of the code HEAD moved to", async () => {

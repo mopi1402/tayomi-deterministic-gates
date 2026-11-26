@@ -10,11 +10,11 @@ import {
   type Prompts,
   readGatesFiles,
 } from "./config.ts";
-import { headOf, movedSince } from "./head.ts";
+import { headOf, movedSince, observed, thereOf } from "./head.ts";
 import { cachedReports, cacheReports } from "./report-cache.ts";
 import { check, filesOf, givenFiles, missingTool, namesFiles, type Outcome, wholeProject } from "./run.ts";
-import { changedSince, emptyCommit, hasCommit, lastCommit, snapshot, workingTree } from "./snapshot.ts";
-import { readTurn, type TurnState, writeTurn } from "./turn-state.ts";
+import { changedSince, emptyCommit, hasCommit, lastCommit, sharedDir, snapshot, workingTree } from "./snapshot.ts";
+import { readThere, readTurn, type TurnState, writeThere, writeTurn } from "./turn-state.ts";
 import { judgeWatch, keepWatch, startWatch, TURN_START_MS, watchReport } from "./watch.ts";
 
 /** What the repo says of what the agent is sent: the prompts of the whole check, and its gates, for their own. */
@@ -85,10 +85,16 @@ export async function startTurn(session: string, root: string): Promise<string[]
   const compared = runnable(gates, missing).filter(isCompared);
   startWatches(session, root, runnable(gates, missing));
   const interrupted = readTurn(session, root);
+  // The worktrees of a repo share its commits: what the session knows of them is of the repo, not of the folder.
+  const shared = sharedDir(root);
+  const there = readThere(session, shared);
   if (interrupted?.checked === false) {
-    writeTurn(session, root, interrupted);
+    // What it committed so far stays the session's, and a commit older than this prompt is one a fetch may bring.
+    if (there) writeThere(session, shared, observed(root, there, interrupted.at ?? Date.now()));
+    writeTurn(session, root, { ...interrupted, at: Date.now() });
     return told;
   }
+  writeThere(session, shared, thereOf(root, there));
   const head = headOf(root);
   const { commit: start, tree } = snapshot(root);
   // The turn starts before its reports are ready: a hook stopped for lack of time leaves it, never the turn before.
@@ -199,8 +205,7 @@ function endReports(results: Result[], baselines: Baselines, elsewhere: boolean)
  * them mid-turn changes the next turn, never its own. Without a recorded start, the turn runs from the last commit
  * with the gates of now; with a start git no longer has, from the last commit with the gates and the reports it
  * started with: checking too much beats leaving a hole. When HEAD moved during the turn to code it did not write, as
- * a checkout or a pull does, the turn is only what the tree differs by from the commit HEAD reached, with what the
- * turn committed before: the rest came with that commit.
+ * a checkout or a pull does, the turn is only the files unlike the ones that code holds: the rest came with it.
  */
 export async function checkTurn(session: string, root: string): Promise<CheckedTurn> {
   const recorded = readTurn(session, root);
@@ -217,34 +222,35 @@ export async function checkTurn(session: string, root: string): Promise<CheckedT
     baselines: recorded?.baselines ?? {},
     config: recorded?.config ?? now,
     checked: false,
-    ...(kept ? { head: kept.head, moves: kept.moves } : {}),
+    ...(kept ? { head: kept.head, at: kept.at } : {}),
     // What the earlier stops of the turn told the agent goes on, so its send-backs and waivers add up.
     ...(recorded?.sendBacks ? { sendBacks: recorded.sendBacks } : {}),
   };
-  const moved = kept && movedSince(root, kept);
-  // A report of code HEAD has left serves a gate whose lines name their file, to count the ones of the turn's files.
-  const baselines: Baselines = (gate) => (moved && !namesFiles(gate) ? undefined : turn.baselines[gate.name]);
+  const shared = sharedDir(root);
+  const there = readThere(session, shared);
+  const moved = kept && there && movedSince(root, kept, there);
   const started = performance.now();
   const end = workingTree(root);
   const since = changedSince(root, turn.start, end);
-  const own = moved && new Set([...changedSince(root, moved.to, end), ...moved.committed]);
-  const changed = own ? since.filter((file) => own.has(file)) : since;
+  // A file like the one a commit under HEAD holds came with that commit: the turn did not write it.
+  const changed = (moved?.under ?? []).reduce((files, commit) => {
+    const unlike = new Set(changedSince(root, commit, end));
+    return files.filter((file) => unlike.has(file));
+  }, since);
+  // Code came with a commit, or left with one: the tree the turn started on no longer tells what the turn wrote.
+  const elsewhere = moved !== undefined && (moved.arrived || changed.length < since.length);
+  // Where a gate given the turn starts from: then, the commit that brought the code.
+  const from = (elsewhere ? moved?.to : undefined) ?? turn.start;
+  // A report of code HEAD has left serves a gate whose lines name their file, to count the ones of the turn's files.
+  const baselines: Baselines = (gate) => (elsewhere && !namesFiles(gate) ? undefined : turn.baselines[gate.name]);
   const config = gatesOf(turn.config);
   const { gates, refused } = config;
   const missing = missingTools(root, gates);
   for (const gate of gates) if (keepsWatch(gate)) keepWatch(root, gate);
-  const from = moved?.to ?? turn.start;
-  const results = await runGates(
-    root,
-    runnable(gates, missing),
-    changed,
-    from,
-    baselines,
-    session,
-    moved !== undefined,
-  );
-  cacheReports(root, end, endReports(results, baselines, moved !== undefined));
+  const results = await runGates(root, runnable(gates, missing), changed, from, baselines, session, elsewhere);
+  cacheReports(root, end, endReports(results, baselines, elsewhere));
   writeTurn(session, root, { ...turn, checked: true });
+  if (there) writeThere(session, shared, observed(root, there, kept?.at ?? Date.now()));
   // A compared gate with no report from the turn start can only count its exit code, and a watch has none: a green it
   // did not earn is said.
   const uncompared = results
@@ -262,7 +268,7 @@ export async function checkTurn(session: string, root: string): Promise<CheckedT
     .map(({ gate, why }) => `${gate.name} not run: ${why}`);
   const notes = [
     ...(startNote ? [startNote] : []),
-    ...(moved ? [`HEAD moved during the turn (${moved.how}): only what the turn changed since is checked`] : []),
+    ...(elsewhere ? ["HEAD moved during the turn to code it did not write: only what the turn wrote is checked"] : []),
     ...configNote(changedGatesFiles(turn.config, now)),
     ...uncompared,
     ...refusedNotes(refused),

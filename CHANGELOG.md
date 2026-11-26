@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.10.1
+
+### Fixed
+
+- A turn that commits, then leaves its branch, pulls, rebases or resets, no longer hides what it committed from the gates
+- A turn that leaves its branch and comes back is checked as any other
+- A commit made in another worktree, a conflict resolved in a rebase, and a commit left on another branch by an earlier turn are judged
+- Lines alike in the report of any tool are no longer merged: only the errors `no-new-strict-errors` counts apart are
+- `no-new-clones` no longer reports an old clone the turn only disturbed, without writing in either of its sides
+- A file whose name starts with a space, at the root of the repo, counts as changed
+
 ## 0.10.0
 
 ### Fixed

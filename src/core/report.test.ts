@@ -197,6 +197,26 @@ describe("failures", () => {
     );
   });
 
+  test("leaves the lines of any other tool as they are, however alike, and their tabs", () => {
+    const frame = "\tat org.junit.Runner.run(Runner.java:9)";
+    const output = ["First", frame, "\t}", "Second", frame, "\t}", "\ta_test.go:10: got 1 (2)\twant 3"].join("\n");
+    assert.ok(failures(ran([{ ...outcome("tests", false), output }])).endsWith(`## tests\n${output}`));
+  });
+
+  test("omits lines by what the gate printed, before it says once the ones a helper counts apart", () => {
+    const at = "a.ts: error TS1 at `x`";
+    const strict = { ...outcome("strict", false), output: `${at}\tKept.\n${at} (2)\tKept.\n${at} (3)\tGone.` };
+    const sent = failures({ ...ran([strict]), wording: { gates: [{ name: "strict", omitLines: "Gone\\.$" }] } });
+    assert.ok(sent.endsWith(`## strict\n${at}\tKept. (×2)`), sent);
+  });
+
+  test("says a long report once in a time that grows with it, not with its square", () => {
+    const output = Array.from({ length: 200_000 }, (_, at) => `\tline ${at}`).join("\n");
+    const started = performance.now();
+    failures(ran([{ ...outcome("tests", false), output }]));
+    assert.ok(performance.now() - started < 2000);
+  });
+
   test("leaves out of a report the lines the gate omits, unless none would be left", () => {
     const stack = {
       ...outcome("lint", false),

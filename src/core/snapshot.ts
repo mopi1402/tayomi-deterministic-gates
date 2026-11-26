@@ -8,9 +8,20 @@ interface GitOptions {
   input?: string;
 }
 
-/** Runs git in the repo, and gives what it printed, trimmed. */
+/**
+ * Runs git in the repo, and gives what it printed, without the line break that ends it, however long. Nothing else is
+ * trimmed: the name of a file may start with a space.
+ */
 function git(root: string, args: string[], { env = process.env, input }: GitOptions = {}): string {
-  return execFileSync("git", args, { cwd: root, encoding: "utf8", env, input, stdio: "pipe" }).trim();
+  const printed = execFileSync("git", args, {
+    cwd: root,
+    encoding: "utf8",
+    env,
+    input,
+    stdio: "pipe",
+    maxBuffer: Infinity,
+  });
+  return printed.replace(/\n$/, "");
 }
 
 // One NUL after each path, which git otherwise quotes and escapes when it holds an accent.
@@ -119,29 +130,85 @@ export function changedSince(root: string, start: string, end = workingTree(root
   return paths(git(root, ["diff", "-z", "--name-only", start, end])).sort();
 }
 
-/** A move of HEAD, as its reflog tells it: the commit it left, the one it reached, and how. */
-export interface HeadMove {
-  from: string | undefined;
-  to: string;
-  how: string;
+/** A commit, with its parents, and when it was committed, in seconds. */
+export interface Commit {
+  hash: string;
+  parents: string[];
+  at: number;
 }
 
-/** The moves of HEAD its reflog holds, oldest first: none in a repo with no commit, or that keeps no reflog. */
-export function headMoves(root: string): HeadMove[] {
+/** The commit HEAD is on, and the tips of the branches: nothing in a repo with no commit. */
+export function branchTips(root: string): { head?: string; tips: string[] } {
   try {
-    const entries = git(root, ["reflog", "show", "--format=%H %gs", "HEAD"]).split("\n").filter(Boolean).reverse();
-    const reached = entries.map((entry) => entry.slice(0, entry.indexOf(" ")));
-    return entries.map((entry, at) => ({
-      from: reached[at - 1],
-      to: reached[at] ?? "",
-      how: entry.slice(entry.indexOf(" ") + 1),
-    }));
+    const head = git(root, ["rev-parse", "--verify", "--quiet", "HEAD"]);
+    const tips = git(root, ["for-each-ref", "--format=%(objectname)", "refs/heads"]).split("\n");
+    return { head, tips: [...new Set([head, ...tips.filter(Boolean)])] };
   } catch {
-    return [];
+    return { tips: [] };
   }
 }
 
-/** The files a commit changed. For a merge, the ones it leaves unlike each of its parents: its resolved conflicts. */
-export function commitFiles(root: string, commit: string): string[] {
-  return paths(git(root, ["diff-tree", "--no-commit-id", "--name-only", "-r", "-c", "--root", "-z", commit]));
+/** The folder of git that the worktrees of a repo share: what tells that two of them are of the same repo. */
+export function sharedDir(root: string): string {
+  try {
+    return git(root, ["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+  } catch {
+    return root;
+  }
+}
+
+/** Whether a commit is another one, or one it holds. */
+export function isIn(root: string, commit: string, other: string): boolean {
+  try {
+    git(root, ["merge-base", "--is-ancestor", commit, other]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** The commits these tips hold that none of the known commits does. It throws when git no longer has one of them. */
+export function commitsPast(root: string, tips: string[], known: string[]): Commit[] {
+  const input = known.map((commit) => `^${commit}\n`).join("");
+  // Two lines a commit: "commit", its hash and its parents, then its time.
+  const lines = git(root, ["rev-list", "--parents", "--format=%ct", "--stdin", ...tips], { input }).split("\n");
+  return lines.filter(Boolean).flatMap((line, at, all) => {
+    if (at % 2) return [];
+    const [, hash = "", ...parents] = line.split(" ");
+    return [{ hash, parents, at: Number(all[at + 1]) }];
+  });
+}
+
+/** Lines a change wrote in a file: where they start, and how many. None of them, where it only cut lines out after that one. */
+export interface WrittenLines {
+  at: number;
+  lines: number;
+}
+
+/**
+ * The lines of a file the working tree wrote since a commit that has the file. The file is compared with the one of
+ * the commit, not through the index, which does not know a file nobody added; and with the diff of git itself, plain,
+ * whatever colours or program the owner set for it.
+ */
+export function writtenSince(root: string, commit: string, file: string): WrittenLines[] {
+  const plain = ["--no-color", "--no-ext-diff", "--no-textconv", "--unified=0", "--inter-hunk-context=0"];
+  // The name as it is: git would otherwise read the brackets of a file such as [slug].ts as a pattern.
+  const diff = git(root, ["--literal-pathspecs", "diff", ...plain, `${commit}:${file}`, "--", file]);
+  const hunks = diff.matchAll(/^@@ -\S+ \+(\d+)(?:,(\d+))? @@/gm);
+  return [...hunks].map(([, at, lines = "1"]) => ({ at: Number(at), lines: Number(lines) }));
+}
+
+// Fewer names at once than a command line holds.
+const NAMES_AT_ONCE = 500;
+
+/** The ones of these files a commit has. */
+export function filesAt(root: string, commit: string, files: string[]): string[] {
+  const found: string[] = [];
+  for (let at = 0; at < files.length; at += NAMES_AT_ONCE) {
+    const names = files.slice(at, at + NAMES_AT_ONCE);
+    found.push(
+      ...paths(git(root, ["--literal-pathspecs", "ls-tree", "-r", "--name-only", "-z", commit, "--", ...names])),
+    );
+  }
+  return found;
 }

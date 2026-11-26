@@ -168,14 +168,21 @@ function sent(report: string, omitLines: string | undefined): string {
   return kept.some((line) => line.trim()) ? kept.join("\n") : report;
 }
 
-// A helper of the engine counts apart the errors of one source line, with `(2)` before the tab that ends their key,
-// so that one more of them is new. The agent reads each of them once, with how many times it stands.
+// A helper of the engine counts apart the errors of one source line, with `(2)` after the source it quotes and before
+// the tab that ends their key, so that one more of them is new. The agent reads each of them once, with how many
+// times it stands. A line of another tool is left as it is.
+const COUNTED_APART = /` \(\d+\)\t/;
+
 function saidOnce(report: string): string {
-  const lines = report.split("\n").map((line) => line.replace(/ \(\d+\)\t/, "\t"));
+  if (!COUNTED_APART.test(report)) return report;
+  const lines = report.split("\n");
+  const keyed = lines.map((line) => line.replace(COUNTED_APART, "`\t"));
+  const counted = new Set(keyed.filter((line, at) => line !== lines[at]));
   const times = new Map<string, number>();
-  for (const line of lines) if (line.includes("\t")) times.set(line, (times.get(line) ?? 0) + 1);
-  return lines
-    .filter((line, at) => !times.has(line) || lines.indexOf(line) === at)
+  for (const line of keyed) if (counted.has(line)) times.set(line, (times.get(line) ?? 0) + 1);
+  const said = new Set<string>();
+  return keyed
+    .filter((line) => !times.has(line) || (!said.has(line) && said.add(line)))
     .map((line) => ((times.get(line) ?? 1) > 1 ? `${line} (×${times.get(line)})` : line))
     .join("\n");
 }
@@ -217,13 +224,13 @@ export function toolsToInstall(missing: string[], prompt?: Prompt): string {
 
 /**
  * The report of each failed gate, under its name, how to act on one the turn broke, and the prompt of the repo for it:
- * each line a helper counts apart said once, less the lines the gate omits, in the characters it has, and in its share of a total when the reports have one.
+ * less the lines the gate omits, each line a helper counts apart said once, in the characters it has, and in its share of a total when the reports have one.
  */
 export function reports({ outcomes, wording = {} }: Pick<CheckedTurn, "outcomes" | "wording">): string[] {
   const { gates = [], prompts, maxTotalReportChars = Infinity } = wording;
   const red = outcomes.filter(failed).map(({ name, output, broken }) => {
     const gate = gates.find((known) => known.name === name);
-    const report = sent(saidOnce(output), gate?.omitLines);
+    const report = saidOnce(sent(output, gate?.omitLines));
     const told = [
       ...(broken ? [worded(BROKEN_GATE, prompts?.brokenGate, "\n")] : []),
       ...(gate?.prompt ? [gate.prompt.text] : []),

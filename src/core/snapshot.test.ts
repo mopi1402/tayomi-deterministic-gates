@@ -115,3 +115,13 @@ describe("fileAt", () => {
     }
   });
 });
+
+describe("a file whose name starts with a space or a line break", () => {
+  test("is listed and counted as changed, at the root of the repo too", () => {
+    const start = snapshot(repo).commit;
+    writeFileSync(join(repo, " lead.ts"), "1");
+    writeFileSync(join(repo, "\nbreak.ts"), "1");
+    assert.deepEqual(changedSince(repo, start), ["\nbreak.ts", " lead.ts"]);
+    assert.ok(listFiles(repo).includes(" lead.ts"));
+  });
+});

@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GatesFiles } from "./config.ts";
-import type { Head } from "./head.ts";
+import type { Head, There } from "./head.ts";
 import { isRecord, isStringArray, isStringRecord, readJsonFile } from "./json.ts";
 
 /** A red gate the agent chose to leave, with why, bound to the fingerprint of the report it saw. */
@@ -53,6 +53,8 @@ interface SessionState {
   told?: Record<string, string[]>;
   /** The repos a send-back of the session told the agent how to act in: the next ones there say it in one line. */
   conductTold?: string[];
+  /** What the session knows of the commits of each repo, for as long as it lasts, whatever repo its turns are in. */
+  there?: Record<string, There>;
 }
 
 const EMPTY: SessionState = { turns: {} };
@@ -80,12 +82,16 @@ function isTurnState(value: unknown): value is TurnState {
     isRecord(value) &&
     typeof value.start === "string" &&
     (value.head === undefined || typeof value.head === "string") &&
-    (value.moves === undefined || typeof value.moves === "number") &&
+    (value.at === undefined || typeof value.at === "number") &&
     isStringRecord(value.baselines) &&
     isGatesFiles(value.config) &&
     typeof value.checked === "boolean" &&
     (value.sendBacks === undefined || isSendBacks(value.sendBacks))
   );
+}
+
+function isThere(value: unknown): value is There {
+  return isRecord(value) && isStringArray(value.known) && isStringArray(value.made);
 }
 
 function isSessionState(value: unknown): value is SessionState {
@@ -95,7 +101,8 @@ function isSessionState(value: unknown): value is SessionState {
     isRecord(value.turns) &&
     Object.values(value.turns).every(isTurnState) &&
     (value.told === undefined || (isRecord(value.told) && Object.values(value.told).every(isStringArray))) &&
-    (value.conductTold === undefined || isStringArray(value.conductTold))
+    (value.conductTold === undefined || isStringArray(value.conductTold)) &&
+    (value.there === undefined || (isRecord(value.there) && Object.values(value.there).every(isThere)))
   );
 }
 
@@ -121,6 +128,16 @@ export function writeTurn(session: string, root: string, turn: TurnState): void 
   const { turns, ...state } = readSession(session);
   const unchecked = Object.entries(turns).filter(([, kept]) => !kept.checked);
   writeSession(session, { ...state, current: root, turns: { ...Object.fromEntries(unchecked), [root]: turn } });
+}
+
+/** What the session knows of the commits of a repo, or nothing before its first turn there. */
+export function readThere(session: string, root: string): There | undefined {
+  return readSession(session).there?.[root];
+}
+
+export function writeThere(session: string, root: string, there: There): void {
+  const state = readSession(session);
+  writeSession(session, { ...state, there: { ...state.there, [root]: there } });
 }
 
 /** Ends the turn in progress without a check, as a prompt from a folder with no gates, or a failed start, does. */
